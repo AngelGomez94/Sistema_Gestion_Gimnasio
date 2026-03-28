@@ -1,0 +1,632 @@
+import customtkinter as ctk
+from tkinter import ttk, messagebox
+import sqlite3
+from datetime import datetime, timedelta
+import os
+from modal_cobro import ModalCobro
+
+class MiembrosFrame(ctk.CTkFrame):
+    def __init__(self, parent):
+        super().__init__(parent, corner_radius=10, fg_color="transparent")
+        
+        # --- VARIABLES DEL FORMULARIO ---
+        self.var_id = ctk.StringVar()
+        self.var_nombre = ctk.StringVar()
+        self.var_apellidos = ctk.StringVar()
+        self.var_telefono = ctk.StringVar()
+        self.var_emergencia = ctk.StringVar()
+        self.var_email = ctk.StringVar()
+        self.var_enfermedad = ctk.StringVar(value="") 
+        self.var_plan = ctk.StringVar(value="Seleccionar...")
+        self.var_locker = ctk.StringVar(value="No") # NUEVA VARIABLE PARA LOCKER
+        self.var_estatus = ctk.StringVar(value="Activo")
+        self.var_busqueda = ctk.StringVar()
+
+        for var in [self.var_nombre, self.var_apellidos, self.var_telefono, self.var_emergencia, self.var_email, self.var_enfermedad, self.var_plan, self.var_estatus]:
+            var.trace_add("write", self.validar_formulario)
+
+        self.vista_lista = ctk.CTkFrame(self, fg_color="transparent")
+        self.vista_formulario = ctk.CTkFrame(self, fg_color="transparent")
+        
+        self.configurar_vista_lista()
+        self.configurar_vista_formulario()
+        
+        self.mostrar_lista()
+
+    def obtener_planes_db(self):
+        conn = sqlite3.connect('gimnasio.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT nombre FROM planes_config")
+        planes = [fila[0] for fila in cursor.fetchall()]
+        conn.close()
+        return planes
+
+    def obtener_costo_locker(self):
+        conn = sqlite3.connect('gimnasio.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT costo_locker FROM configuracion LIMIT 1")
+        resultado = cursor.fetchone()
+        conn.close()
+        return resultado[0] if resultado else 0.0
+
+    # ==========================================
+    # VISTA 1: LISTA Y BUSCADOR 
+    # ==========================================
+    def configurar_vista_lista(self):
+        top_frame = ctk.CTkFrame(self.vista_lista, fg_color="transparent")
+        top_frame.pack(fill="x", pady=(0, 20))
+        
+        ctk.CTkLabel(top_frame, text="🔍 Buscar:", font=("Arial", 14, "bold")).pack(side="left", padx=(10, 5))
+        self.entry_buscar = ctk.CTkEntry(
+            top_frame, 
+            placeholder_text="Nombre, apellidos, teléfono o estatus...", 
+            width=400
+        )
+        self.entry_buscar.pack(side="left", padx=(0, 10))
+        self.entry_buscar.bind('<Return>', self.buscar_miembros) 
+        
+        btn_nuevo = ctk.CTkButton(top_frame, text="➕ Nuevo Miembro", command=lambda: self.mostrar_formulario())
+        btn_nuevo.pack(side="right")
+        
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure("Treeview", rowheight=30, font=("Arial", 11))
+        style.configure("Treeview.Heading", font=("Arial", 12, "bold"))
+        
+        columnas = ("id", "nombre", "plan", "estatus", "vencimiento", "restantes")
+        self.tabla = ttk.Treeview(self.vista_lista, columns=columnas, show="headings", height=15)
+                
+        self.tabla.heading("id", text="ID")
+        self.tabla.heading("nombre", text="Nombre del Socio")
+        self.tabla.heading("plan", text="Tipo de Plan")
+        self.tabla.heading("estatus", text="Estatus")
+        self.tabla.heading("vencimiento", text="Vencimiento")
+        self.tabla.heading("restantes", text="Días Restantes") # NUEVO ENCABEZADO
+        
+        self.tabla.column("id", width=50, anchor="center")
+        self.tabla.column("nombre", width=250)
+        self.tabla.column("plan", width=150, anchor="center")
+        self.tabla.column("estatus", width=100, anchor="center")
+        self.tabla.column("vencimiento", width=120, anchor="center")
+        self.tabla.column("restantes", width=120, anchor="center") # NUEVO ANCHO DE COLUMNA
+        self.tabla.tag_configure('vigente', foreground='green')
+        self.tabla.tag_configure('vencido', foreground='red')
+        self.tabla.tag_configure('por_vencer', foreground='#d35400') # Naranja (Alerta)
+        self.tabla.tag_configure('inactivo', foreground='gray')
+        self.tabla.pack(fill="both", expand=True)
+        self.tabla.bind("<Double-1>", self.editar_socio) 
+        
+        self.lbl_sin_resultados = ctk.CTkLabel(self.vista_lista, text="", text_color="red", font=("Arial", 14))
+
+    def cargar_datos_tabla(self, query="SELECT * FROM miembros", parametros=()):
+        for item in self.tabla.get_children():
+            self.tabla.delete(item)
+            
+        conn = sqlite3.connect('gimnasio.db')
+        cursor = conn.cursor()
+        cursor.execute(query, parametros)
+        filas = cursor.fetchall()
+        
+        hoy = datetime.now().date()
+        
+        if not filas:
+            if self.entry_buscar.get().strip() != "":
+                self.lbl_sin_resultados.configure(text="Socio no encontrado.")
+                self.lbl_sin_resultados.pack(pady=10)
+            else:
+                self.lbl_sin_resultados.pack_forget() 
+        else:
+            self.lbl_sin_resultados.pack_forget()
+            # --- DICCIONARIO DE REGLAS DE AVISO ---
+            umbrales_aviso = {
+                "Primera Visita": 0,
+                "Visita": 0,
+                "Semana": 2, # Empieza a avisar 2 días antes
+                "Mensualidad": 5, # Empieza a avisar 5 días antes
+                "Anualidad": 15
+            }
+
+            for fila in filas:
+                id_socio = fila[0]
+                nombre_completo = f"{fila[1]} {fila[2]}"
+                plan = fila[8]
+                vencimiento_str = fila[11] 
+                estatus = fila[12] 
+                
+                vencimiento_date = datetime.strptime(vencimiento_str, "%Y-%m-%d").date()
+                dias_restantes = (vencimiento_date - hoy).days # Cuántos días le quedan
+                umbral = umbrales_aviso.get(plan, 0) # Obtenemos la regla según su plan
+                
+                texto_restante = "-"
+                tag = 'inactivo'
+                
+                if estatus == "Activo":
+                    if dias_restantes < 0:
+                        # REGLA 1: Se le acabó el tiempo. Pasa a Inactivo inmediatamente.
+                        cursor.execute("UPDATE miembros SET estatus='Inactivo' WHERE id=?", (id_socio,))
+                        conn.commit()
+                        estatus = "Inactivo"
+                        tag = 'inactivo'
+                        texto_restante = "Vencido"
+                        
+                    elif dias_restantes == 0:
+                        # REGLA 2: Vence el día de hoy. Súper alerta naranja.
+                        tag = 'por_vencer'
+                        texto_restante = "Vence HOY"
+                        
+                    elif dias_restantes <= umbral:
+                        # REGLA 3: Entró en su periodo de prevención (Ej. le quedan 3 días al de Mensualidad)
+                        tag = 'por_vencer'
+                        texto_restante = f"{dias_restantes} días"
+                        
+                    else:
+                        # REGLA 4: Está sobrado de tiempo (Verde)
+                        tag = 'vigente'
+                        texto_restante = f"{dias_restantes} días"
+                else:
+                    # Si ya estaba Inactivo por otra razón
+                    tag = 'inactivo'
+                    texto_restante = "Inactivo"
+                        
+                # Insertamos la fila en la tabla
+                self.tabla.insert("", "end", values=(id_socio, nombre_completo, plan, estatus, vencimiento_str, texto_restante), tags=(tag,))
+        conn.close()
+
+    def buscar_miembros(self, event=None):
+        termino = f"%{self.entry_buscar.get().strip()}%"
+        query = "SELECT * FROM miembros WHERE nombre LIKE ? OR apellidos LIKE ? OR telefono LIKE ? OR estatus LIKE ?"
+        self.cargar_datos_tabla(query, (termino, termino, termino, termino))
+
+    # ==========================================
+    # VISTA 2: FORMULARIO 
+    # ==========================================
+    def configurar_vista_formulario(self):
+        frame_top = ctk.CTkFrame(self.vista_formulario, fg_color="transparent")
+        frame_top.pack(fill="x", pady=10, padx=20)
+        ctk.CTkButton(frame_top, text="⬅ Volver a la lista", fg_color="gray", command=self.mostrar_lista).pack(side="left")
+        
+        self.lbl_titulo_form = ctk.CTkLabel(self.vista_formulario, text="Registrar Nuevo Socio", font=("Arial", 24, "bold"))
+        self.lbl_titulo_form.pack(pady=(0, 20))
+
+        contenedor_central = ctk.CTkFrame(self.vista_formulario, fg_color="transparent")
+        contenedor_central.pack(expand=True)
+
+        form_grid = ctk.CTkFrame(contenedor_central, fg_color="transparent")
+        form_grid.pack(pady=10)
+
+        self.lbl_estatus = ctk.CTkLabel(form_grid, text="Estatus del Socio:")
+        self.combo_estatus = ctk.CTkComboBox(form_grid, values=["Activo", "Inactivo"], variable=self.var_estatus, command=self.validar_cambio_estatus)
+
+        ctk.CTkLabel(form_grid, text="Nombre *").grid(row=1, column=0, sticky="w", pady=5)
+        self.entry_nombre = ctk.CTkEntry(form_grid, textvariable=self.var_nombre, width=250)
+        self.entry_nombre.grid(row=1, column=1, sticky="w", padx=(0, 20), pady=5)
+        self.err_nombre = ctk.CTkLabel(form_grid, text="", text_color="red", font=("Arial", 10))
+        self.err_nombre.grid(row=2, column=1, sticky="w")
+
+        ctk.CTkLabel(form_grid, text="Apellidos *").grid(row=1, column=2, sticky="w", pady=5)
+        self.entry_apellidos = ctk.CTkEntry(form_grid, textvariable=self.var_apellidos, width=250)
+        self.entry_apellidos.grid(row=1, column=3, sticky="w", pady=5)
+        self.err_apellidos = ctk.CTkLabel(form_grid, text="", text_color="red", font=("Arial", 10))
+        self.err_apellidos.grid(row=2, column=3, sticky="w")
+
+        ctk.CTkLabel(form_grid, text="Teléfono *").grid(row=3, column=0, sticky="w", pady=5)
+        self.entry_telefono = ctk.CTkEntry(form_grid, textvariable=self.var_telefono, width=250)
+        self.entry_telefono.grid(row=3, column=1, sticky="w", padx=(0, 20), pady=5)
+        self.err_telefono = ctk.CTkLabel(form_grid, text="", text_color="red", font=("Arial", 10))
+        self.err_telefono.grid(row=4, column=1, sticky="w")
+
+        ctk.CTkLabel(form_grid, text="Tel. Emergencia").grid(row=3, column=2, sticky="w", pady=5)
+        self.entry_emergencia = ctk.CTkEntry(form_grid, textvariable=self.var_emergencia, width=250)
+        self.entry_emergencia.grid(row=3, column=3, sticky="w", pady=5)
+
+        ctk.CTkLabel(form_grid, text="Email").grid(row=5, column=0, sticky="w", pady=5)
+        self.entry_email = ctk.CTkEntry(form_grid, textvariable=self.var_email, width=250)
+        self.entry_email.grid(row=5, column=1, sticky="w", padx=(0, 20), pady=5)
+
+        ctk.CTkLabel(form_grid, text="Tipo de Plan *").grid(row=5, column=2, sticky="w", pady=5)
+        self.combo_plan = ctk.CTkComboBox(form_grid, values=["Seleccionar..."], variable=self.var_plan, width=250, command=self.actualizar_costo_plan)
+        self.combo_plan.grid(row=5, column=3, sticky="w", pady=5)
+        
+        # NUEVO: Fila 6 para el Locker y el Costo Total
+        self.switch_locker = ctk.CTkSwitch(form_grid, text="Añadir Locker (+ Costo Extra)", variable=self.var_locker, onvalue="Si", offvalue="No", state="disabled", command=lambda: self.actualizar_costo_plan(self.var_plan.get()))
+        self.switch_locker.grid(row=6, column=2, sticky="w", pady=5)
+
+        self.lbl_costo_plan = ctk.CTkLabel(form_grid, text="", font=("Arial", 12, "bold"))
+        self.lbl_costo_plan.grid(row=6, column=3, sticky="w")
+
+        self.err_plan = ctk.CTkLabel(form_grid, text="", text_color="red", font=("Arial", 10))
+        self.err_plan.grid(row=7, column=3, sticky="w")
+
+        ctk.CTkLabel(form_grid, text="¿Enfermedad/Lesión? *").grid(row=8, column=0, sticky="w", pady=5)
+        frame_radio = ctk.CTkFrame(form_grid, fg_color="transparent")
+        frame_radio.grid(row=8, column=1, sticky="w", pady=5)
+        ctk.CTkRadioButton(frame_radio, text="Sí", variable=self.var_enfermedad, value="Si", command=self.toggle_enfermedad).pack(side="left", padx=(0, 10))
+        ctk.CTkRadioButton(frame_radio, text="No", variable=self.var_enfermedad, value="No", command=self.toggle_enfermedad).pack(side="left")
+        self.err_enf = ctk.CTkLabel(form_grid, text="", text_color="red", font=("Arial", 10))
+        self.err_enf.grid(row=9, column=1, sticky="w")
+
+        ctk.CTkLabel(form_grid, text="Detalles:").grid(row=8, column=2, sticky="nw", pady=5)
+        self.txt_detalles = ctk.CTkTextbox(form_grid, width=250, height=60, state="disabled")
+        self.txt_detalles.grid(row=8, column=3, sticky="w", pady=5)
+
+        frame_acciones = ctk.CTkFrame(contenedor_central, fg_color="transparent")
+        frame_acciones.pack(pady=(20, 5))
+
+        self.btn_cancelar = ctk.CTkButton(frame_acciones, text="Cancelar", fg_color="gray", hover_color="#555555", command=self.mostrar_lista, height=40, width=150)
+        self.btn_cancelar.pack(side="left", padx=10)
+
+        self.btn_guardar = ctk.CTkButton(frame_acciones, text="Guardar Socio", state="disabled", command=self.guardar_socio, height=40, width=150)
+        self.btn_guardar.pack(side="left", padx=10)
+        
+        self.lbl_error_bd = ctk.CTkLabel(contenedor_central, text="", text_color="red", font=("Arial", 12, "bold"))
+        self.lbl_error_bd.pack()
+
+    # ==========================================
+    # LÓGICA DE NEGOCIO 
+    # ==========================================
+    def actualizar_costo_plan(self, valor_seleccionado):
+        # 1. CANDADO DEL LOCKER: Solo se habilita si es Mensualidad
+        if valor_seleccionado == "Mensualidad":
+            self.switch_locker.configure(state="normal")
+        else:
+            self.var_locker.set("No")
+            self.switch_locker.configure(state="disabled")
+
+        if valor_seleccionado == "Seleccionar...":
+            self.lbl_costo_plan.configure(text="")
+            return
+
+        # 2. CALCULAR COSTO TOTAL (PLAN + LOCKER)
+        conn = sqlite3.connect('gimnasio.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT costo FROM planes_config WHERE nombre=?", (valor_seleccionado,))
+        resultado = cursor.fetchone()
+        conn.close()
+
+        if resultado:
+            costo_base = resultado[0]
+            if costo_base == 0:
+                self.lbl_costo_plan.configure(text="¡Cortesía! Costo: $0.00 MXN", text_color="#2ecc71")
+            else:
+                costo_total = costo_base
+                texto_desglose = f"Plan: ${costo_base:.2f}"
+                
+                if self.var_locker.get() == "Si":
+                    costo_locker = self.obtener_costo_locker()
+                    costo_total += costo_locker
+                    texto_desglose = f"Plan + Locker: ${costo_total:.2f}"
+                else:
+                    texto_desglose = f"Total a cobrar: ${costo_total:.2f} MXN"
+
+                self.lbl_costo_plan.configure(text=texto_desglose, text_color="white")
+                
+                # --- NUEVA MAGIA: AUTO-REACTIVACIÓN ---
+                # Si el plan cuesta dinero y estamos editando un socio existente, lo revivimos.
+                if self.var_id.get() != "": 
+                    self.var_estatus.set("Activo")
+
+    def mostrar_lista(self):
+        self.vista_formulario.pack_forget()
+        self.vista_lista.pack(fill="both", expand=True)
+        self.entry_buscar.delete(0, "end") 
+        self.cargar_datos_tabla()
+
+    def mostrar_formulario(self, id_socio=None):
+        self.vista_lista.pack_forget()
+        self.vista_formulario.pack(fill="both", expand=True)
+        self.lbl_error_bd.configure(text="") 
+        
+        planes_disponibles = self.obtener_planes_db()
+        
+        if id_socio is None:
+            self.lbl_titulo_form.configure(text="Registrar Nuevo Socio")
+            self.btn_guardar.configure(text="Guardar Socio")
+            self.lbl_estatus.grid_remove()
+            self.combo_estatus.grid_remove()
+            
+            planes_disponibles.insert(0, "Seleccionar...")
+            self.combo_plan.configure(values=planes_disponibles)
+            
+            for var in [self.var_id, self.var_nombre, self.var_apellidos, self.var_telefono, self.var_emergencia, self.var_email]:
+                var.set("")
+            self.var_enfermedad.set("")
+            self.var_plan.set("Seleccionar...")
+            self.var_locker.set("No") # Reiniciar locker
+            self.switch_locker.configure(state="disabled")
+            self.lbl_costo_plan.configure(text="") 
+            self.txt_detalles.configure(state="normal")
+            self.txt_detalles.delete("1.0", "end")
+            self.txt_detalles.configure(state="disabled")
+        else:
+            self.lbl_titulo_form.configure(text="Modificar Socio")
+            self.btn_guardar.configure(text="Actualizar Socio")
+            self.lbl_estatus.grid(row=0, column=0, sticky="w", pady=(0, 15))
+            self.combo_estatus.grid(row=0, column=1, sticky="w", pady=(0, 15))
+            
+            if "Primera Visita" in planes_disponibles:
+                planes_disponibles.remove("Primera Visita")
+            planes_disponibles.insert(0, "Seleccionar...")
+            self.combo_plan.configure(values=planes_disponibles)
+            
+            self.cargar_datos_socio(id_socio)
+
+    def toggle_enfermedad(self):
+        if self.var_enfermedad.get() == "Si":
+            self.txt_detalles.configure(state="normal")
+        else:
+            self.txt_detalles.configure(state="normal")
+            self.txt_detalles.delete("1.0", "end")
+            self.txt_detalles.configure(state="disabled")
+        self.validar_formulario()
+
+    def validar_cambio_estatus(self, valor):
+        if valor == "Inactivo":
+            id_socio = self.var_id.get()
+            if id_socio:
+                conn = sqlite3.connect('gimnasio.db')
+                cursor = conn.cursor()
+                cursor.execute("SELECT fecha_vencimiento FROM miembros WHERE id=?", (id_socio,))
+                res = cursor.fetchone()
+                conn.close()
+                if res:
+                    vencimiento = datetime.strptime(res[0], "%Y-%m-%d").date()
+                    if vencimiento >= datetime.now().date():
+                        respuesta = messagebox.askyesno("Advertencia", "Plan del socio en vigencia, ¿estás seguro de que deseas inactivarlo?")
+                        if not respuesta:
+                            self.var_estatus.set("Activo") 
+
+    def validar_formulario(self, *args):
+        es_valido = True
+        
+        nombre = self.var_nombre.get()
+        if len(nombre) > 50: self.var_nombre.set(nombre[:50])
+        if not nombre.strip():
+            self.err_nombre.configure(text="El nombre no puede estar en blanco")
+            es_valido = False
+        elif any(char.isdigit() for char in nombre):
+            self.err_nombre.configure(text="Solo se permiten letras")
+            es_valido = False
+        else:
+            self.err_nombre.configure(text="")
+
+        apellidos = self.var_apellidos.get()
+        if len(apellidos) > 50: self.var_apellidos.set(apellidos[:50])
+        if not apellidos.strip():
+            self.err_apellidos.configure(text="Los apellidos son obligatorios")
+            es_valido = False
+        else:
+            self.err_apellidos.configure(text="")
+
+        tel = self.var_telefono.get()
+        if len(tel) > 12: self.var_telefono.set(tel[:12])
+        if not tel.strip():
+            self.err_telefono.configure(text="Teléfono obligatorio")
+            es_valido = False
+        elif not tel.isdigit():
+            self.err_telefono.configure(text="Solo números permitidos")
+            es_valido = False
+        else:
+            self.err_telefono.configure(text="")
+
+        if self.var_enfermedad.get() not in ["Si", "No"]:
+            self.err_enf.configure(text="Seleccione una opción")
+            es_valido = False
+        else:
+            self.err_enf.configure(text="")
+
+        if self.var_plan.get() == "Seleccionar...":
+            self.err_plan.configure(text="Debe seleccionar un plan")
+            es_valido = False
+        else:
+            self.err_plan.configure(text="")
+
+        if es_valido:
+            self.btn_guardar.configure(state="normal")
+        else:
+            self.btn_guardar.configure(state="disabled")
+
+    def guardar_socio(self):
+        conn = sqlite3.connect('gimnasio.db')
+        cursor = conn.cursor()
+        
+        id_actual = self.var_id.get()
+        if id_actual: 
+            cursor.execute("SELECT id FROM miembros WHERE telefono=? AND id!=?", (self.var_telefono.get(), id_actual))
+        else: 
+            cursor.execute("SELECT id FROM miembros WHERE telefono=?", (self.var_telefono.get(),))
+            
+        if cursor.fetchone():
+            self.lbl_error_bd.configure(text="Error: Este teléfono ya existe.")
+            conn.close()
+            return
+            
+        plan = self.var_plan.get()
+        cursor.execute("SELECT costo FROM planes_config WHERE nombre=?", (plan,))
+        res_plan = cursor.fetchone()
+        
+        monto_plan = res_plan[0] if res_plan else 0.0
+        monto_locker = 0.0
+        
+        if self.var_locker.get() == "Si":
+            cursor.execute("SELECT costo_locker FROM configuracion LIMIT 1")
+            res_locker = cursor.fetchone()
+            if res_locker:
+                monto_locker = res_locker[0]
+        conn.close()
+
+        total = monto_plan + monto_locker
+
+        if total > 0:
+            # Llamamos al modal y le pasamos los montos separados
+            ModalCobro(self.winfo_toplevel(), monto_plan, monto_locker, self.ejecutar_guardado_bd)
+        else:
+            self.ejecutar_guardado_bd("Cortesía", "0", 0.0, 0.0)
+
+    def ejecutar_guardado_bd(self, metodo_pago, monto_recibido, monto_plan, monto_locker):
+        conn = sqlite3.connect('gimnasio.db')
+        cursor = conn.cursor()
+        
+        id_actual = self.var_id.get()
+        hoy = datetime.now().date()
+        plan = self.var_plan.get()
+        vencimiento = None
+        
+        # --- NUEVO: DEFINIR SI ES ALTA O RENOVACIÓN ---
+        concepto_venta = "Renovación" if id_actual else "Nueva Membresía"
+        total_pagado = monto_plan + monto_locker
+        
+        if id_actual:
+            cursor.execute("SELECT tipo_plan, fecha_vencimiento FROM miembros WHERE id=?", (id_actual,))
+            res_actual = cursor.fetchone()
+            if res_actual:
+                plan_bd = res_actual[0]
+                venc_bd = datetime.strptime(res_actual[1], "%Y-%m-%d").date()
+                if plan == plan_bd:
+                    vencimiento = venc_bd
+
+        if vencimiento is None:
+            cursor.execute("SELECT dias_duracion FROM planes_config WHERE nombre=?", (plan,))
+            res_plan = cursor.fetchone()
+            if res_plan:
+                dias = res_plan[0]
+                vencimiento = hoy if dias <= 1 else hoy + timedelta(days=dias)
+            else:
+                vencimiento = hoy 
+        
+        detalles_enf = self.txt_detalles.get("1.0", "end-1c")
+        usa_locker = self.var_locker.get()
+
+        try:
+            if id_actual:
+                # Actualizamos al socio
+                cursor.execute('''UPDATE miembros SET 
+                                nombre=?, apellidos=?, telefono=?, telefono_emergencia=?, email=?, 
+                                enfermedad=?, detalles_enfermedad=?, tipo_plan=?, usa_locker=?, fecha_vencimiento=?, estatus=? 
+                                WHERE id=?''', 
+                               (self.var_nombre.get(), self.var_apellidos.get(), self.var_telefono.get(), 
+                                self.var_emergencia.get(), self.var_email.get(), self.var_enfermedad.get(), 
+                                detalles_enf, plan, usa_locker, vencimiento.strftime("%Y-%m-%d"), self.var_estatus.get(), id_actual))
+                id_para_pago = id_actual # Usamos el ID que ya tenía
+            else:
+                # Registramos al socio nuevo
+                cursor.execute('''INSERT INTO miembros 
+                                (nombre, apellidos, telefono, telefono_emergencia, email, enfermedad, detalles_enfermedad, tipo_plan, usa_locker, fecha_registro, fecha_vencimiento, estatus)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                               (self.var_nombre.get(), self.var_apellidos.get(), self.var_telefono.get(), 
+                                self.var_emergencia.get(), self.var_email.get(), self.var_enfermedad.get(), 
+                                detalles_enf, plan, usa_locker, hoy.strftime("%Y-%m-%d"), vencimiento.strftime("%Y-%m-%d"), "Activo"))
+                id_para_pago = cursor.lastrowid # Obtenemos el ID que la BD le acaba de asignar
+            
+            # --- NUEVO: GUARDAR EL DINERO EN LA TABLA DE PAGOS ---
+            if total_pagado > 0: # Solo si no fue cortesía
+                fecha_hora_exacta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                cursor.execute('''INSERT INTO pagos (miembro_id, concepto, monto, metodo_pago, fecha_hora) 
+                                  VALUES (?, ?, ?, ?, ?)''',
+                               (id_para_pago, concepto_venta, total_pagado, metodo_pago, fecha_hora_exacta))
+            
+            conn.commit()
+            
+            nombre_cliente = f"{self.var_nombre.get()} {self.var_apellidos.get()}"
+            self.generar_ticket(nombre_cliente, plan, monto_plan, monto_locker, metodo_pago, vencimiento.strftime("%d/%m/%Y"))
+            
+            messagebox.showinfo("Éxito", "Cobro realizado y socio guardado.\nTicket generado.")
+            self.mostrar_lista() 
+            
+        except Exception as e:
+            self.lbl_error_bd.configure(text="Error al guardar en base de datos.")
+            print(f"Error técnico: {e}")
+        finally:
+            conn.close()
+
+    def generar_ticket(self, nombre_cliente, plan, monto_plan, monto_locker, metodo_pago, fecha_vencimiento):
+        # Esta función crea un archivo .txt con formato de ticket de impresora térmica (58mm/80mm)
+        fecha_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        total = monto_plan + monto_locker
+        
+        ticket = f"""
+================================
+          SportLife GYM           
+================================
+Fecha: {fecha_hora}
+Socio: {nombre_cliente}
+
+--- DESGLOSE DE COMPRA ---
+Plan: {plan}
+Subtotal Membresia: ${monto_plan:,.2f}
+"""
+        if monto_locker > 0:
+            ticket += f"Subtotal Locker:    ${monto_locker:,.2f}\n"
+
+        ticket += f"""--------------------------------
+TOTAL A PAGAR:      ${total:,.2f}
+Metodo de Pago:     {metodo_pago}
+Vencimiento Plan:   {fecha_vencimiento}
+--------------------------------
+
+ALERTA Y EXENCION DE RESPONSABILIDAD:
+El uso de las instalaciones es bajo su 
+propio riesgo. El gimnasio no se hace 
+responsable por lesiones, problemas de 
+salud o incidentes derivados del uso de 
+suplementos, bebidas energeticas o 
+sobreesfuerzo fisico. Consulte a su 
+medico antes de entrenar.
+
+¡GRACIAS POR TU PREFERENCIA!
+================================
+"""
+        # Guardamos el ticket en una carpeta local (simulando la impresión)
+        if not os.path.exists("tickets"):
+            os.makedirs("tickets")
+            
+        nombre_archivo = f"tickets/ticket_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        with open(nombre_archivo, "w", encoding="utf-8") as file:
+            file.write(ticket)
+            
+        print(f"Ticket generado en: {nombre_archivo}")
+        # En el futuro, aquí enviaremos este texto directo al puerto USB/COM de la impresora térmica.
+
+    def editar_socio(self, event):
+        item_seleccionado = self.tabla.focus()
+        if item_seleccionado:
+            valores = self.tabla.item(item_seleccionado, "values")
+            id_socio = valores[0]
+            self.mostrar_formulario(id_socio)
+
+    def cargar_datos_socio(self, id_socio):
+        conn = sqlite3.connect('gimnasio.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM miembros WHERE id=?", (id_socio,))
+        fila = cursor.fetchone()
+        conn.close()
+
+        if fila:
+            self.var_id.set(fila[0])
+            self.var_nombre.set(fila[1])
+            self.var_apellidos.set(fila[2])
+            self.var_telefono.set(fila[3])
+            self.var_emergencia.set(fila[4] if fila[4] else "")
+            self.var_email.set(fila[5] if fila[5] else "")
+            
+            enf = fila[6]
+            self.var_enfermedad.set(enf)
+            self.toggle_enfermedad()
+            if enf == "Si" and fila[7]:
+                self.txt_detalles.insert("1.0", fila[7])
+                
+            plan_guardado = fila[8]
+            locker_guardado = fila[9] # Recuperamos si tiene locker (Sí o No)
+            vencimiento_str = fila[11] 
+            vencimiento_date = datetime.strptime(vencimiento_str, "%Y-%m-%d").date()
+            hoy = datetime.now().date()
+            
+            if plan_guardado == "Primera Visita" and vencimiento_date <= hoy:
+                self.var_plan.set("Seleccionar...")
+                self.actualizar_costo_plan("Seleccionar...")
+            else:
+                self.var_plan.set(plan_guardado)
+                self.var_locker.set(locker_guardado) # Prendemos o apagamos el switch
+                self.actualizar_costo_plan(plan_guardado)
+            
+            self.var_estatus.set(fila[12])
+            self.validar_formulario()
