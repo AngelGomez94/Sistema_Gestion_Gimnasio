@@ -4,6 +4,8 @@ import sqlite3
 from datetime import datetime, timedelta
 import os
 from modal_cobro import ModalCobro
+import cv2
+from PIL import Image
 
 class MiembrosFrame(ctk.CTkFrame):
     def __init__(self, parent):
@@ -248,6 +250,26 @@ class MiembrosFrame(ctk.CTkFrame):
         ctk.CTkLabel(form_grid, text="Detalles:").grid(row=8, column=2, sticky="nw", pady=5)
         self.txt_detalles = ctk.CTkTextbox(form_grid, width=250, height=60, state="disabled")
         self.txt_detalles.grid(row=8, column=3, sticky="w", pady=5)
+        # --- NUEVA SECCIÓN: ESTUDIO FOTOGRÁFICO ---
+        # Lo ponemos en la columna 4 para que quede a la derecha de todo el formulario
+        frame_foto = ctk.CTkFrame(form_grid, fg_color="transparent")
+        frame_foto.grid(row=1, column=4, rowspan=8, padx=(30, 0), sticky="n")
+
+        self.lbl_video = ctk.CTkLabel(frame_foto, text="Cámara Apagada", width=200, height=200, fg_color="#2c3e50", corner_radius=10)
+        self.lbl_video.pack(pady=(0, 10))
+        self.lbl_estado_foto = ctk.CTkLabel(frame_foto, text="", font=("Arial", 12, "bold"))
+        self.lbl_estado_foto.pack(pady=(0, 5))
+
+        self.btn_encender_cam = ctk.CTkButton(frame_foto, text="📷 Encender Cámara", command=self.iniciar_camara, width=180)
+        self.btn_encender_cam.pack(pady=5)
+
+        self.btn_tomar_foto = ctk.CTkButton(frame_foto, text="📸 Capturar Foto", command=self.tomar_foto, state="disabled", fg_color="#d35400", hover_color="#e67e22", width=180)
+        self.btn_tomar_foto.pack(pady=5)
+        
+        # Variable para guardar la ruta en la base de datos después
+        self.ruta_foto_actual = ""
+        self.captura = None 
+        # ----------------------------------------
 
         frame_acciones = ctk.CTkFrame(contenedor_central, fg_color="transparent")
         frame_acciones.pack(pady=(20, 5))
@@ -306,6 +328,7 @@ class MiembrosFrame(ctk.CTkFrame):
                     self.var_estatus.set("Activo")
 
     def mostrar_lista(self):
+        self.apagar_camara() # Aseguramos apagar la cámara si estaba encendida
         self.vista_formulario.pack_forget()
         self.vista_lista.pack(fill="both", expand=True)
         self.entry_buscar.delete(0, "end") 
@@ -317,6 +340,19 @@ class MiembrosFrame(ctk.CTkFrame):
         self.lbl_error_bd.configure(text="") 
         
         planes_disponibles = self.obtener_planes_db()
+
+        # ---> NUEVO: LIMPIEZA DE MEMORIA (LAVADO DE CEREBRO) <---
+        self.apagar_camara()
+        self.ruta_foto_actual = ""
+        # Si existe una imagen cargada en memoria, la borramos
+        if hasattr(self, 'imagen_actual_tk'):
+            del self.imagen_actual_tk
+        # Regresamos el recuadro a su estado original (gris y sin foto)
+        self.lbl_video.configure(image="", text="Cámara Apagada", require_redraw=True)
+        self.lbl_estado_foto.configure(text="")
+        self.btn_encender_cam.configure(state="normal", text="📷 Encender Cámara")
+        self.btn_tomar_foto.configure(state="disabled")
+        # --------------------------------------------------------
         
         if id_socio is None:
             self.lbl_titulo_form.configure(text="Registrar Nuevo Socio")
@@ -443,24 +479,48 @@ class MiembrosFrame(ctk.CTkFrame):
         plan = self.var_plan.get()
         cursor.execute("SELECT costo FROM planes_config WHERE nombre=?", (plan,))
         res_plan = cursor.fetchone()
-        
         monto_plan = res_plan[0] if res_plan else 0.0
-        monto_locker = 0.0
         
+        monto_locker = 0.0
         if self.var_locker.get() == "Si":
             cursor.execute("SELECT costo_locker FROM configuracion LIMIT 1")
             res_locker = cursor.fetchone()
             if res_locker:
                 monto_locker = res_locker[0]
-        conn.close()
 
+        # --- NUEVA LÓGICA: ¿Es Venta o solo Actualización de Datos? ---
+        es_renovacion = True
+        if id_actual:
+            cursor.execute("SELECT tipo_plan, fecha_vencimiento, usa_locker FROM miembros WHERE id=?", (id_actual,))
+            res_actual = cursor.fetchone()
+            if res_actual:
+                plan_bd = res_actual[0]
+                venc_bd = datetime.strptime(res_actual[1], "%Y-%m-%d").date()
+                locker_bd = res_actual[2]
+                hoy = datetime.now().date()
+                
+                # Si no ha cambiado de plan y aún está vigente, NO le volvemos a cobrar
+                if plan == plan_bd and venc_bd >= hoy:
+                    monto_plan = 0.0
+                
+                # Si ya tenía el locker y lo mantiene, NO le volvemos a cobrar el locker
+                if self.var_locker.get() == "Si" and locker_bd == "Si":
+                    monto_locker = 0.0
+                    
+                # Si ambos montos bajan a cero, es solo una actualización (ej. ponerle foto)
+                if monto_plan == 0.0 and monto_locker == 0.0:
+                    es_renovacion = False
+
+        conn.close()
         total = monto_plan + monto_locker
 
         if total > 0:
-            # Llamamos al modal y le pasamos los montos separados
+            # Solo abrimos la caja si hay algo que cobrar
             ModalCobro(self.winfo_toplevel(), monto_plan, monto_locker, self.ejecutar_guardado_bd)
         else:
-            self.ejecutar_guardado_bd("Cortesía", "0", 0.0, 0.0)
+            # Si el total es 0, brincamos directo a guardar los datos (silenciosamente)
+            motivo = "Actualización" if id_actual and not es_renovacion else "Cortesía"
+            self.ejecutar_guardado_bd(motivo, "0", 0.0, 0.0)
 
     def ejecutar_guardado_bd(self, metodo_pago, monto_recibido, monto_plan, monto_locker):
         conn = sqlite3.connect('gimnasio.db')
@@ -471,18 +531,30 @@ class MiembrosFrame(ctk.CTkFrame):
         plan = self.var_plan.get()
         vencimiento = None
         
-        # --- NUEVO: DEFINIR SI ES ALTA O RENOVACIÓN ---
-        concepto_venta = "Renovación" if id_actual else "Nueva Membresía"
+        # --- NUEVO: DEFINIR EL CONCEPTO EXACTO PARA EL TICKET Y CORREO ---
+        if metodo_pago == "Cortesía":
+            concepto_venta = "Cortesía (Visita Gratis)"
+        elif id_actual:
+            concepto_venta = "Renovación de Membresía"
+        else:
+            concepto_venta = "Nueva Membresía"
+            
         total_pagado = monto_plan + monto_locker
         
         if id_actual:
-            cursor.execute("SELECT tipo_plan, fecha_vencimiento FROM miembros WHERE id=?", (id_actual,))
+            cursor.execute("SELECT tipo_plan, fecha_vencimiento, ruta_foto FROM miembros WHERE id=?", (id_actual,))
             res_actual = cursor.fetchone()
             if res_actual:
                 plan_bd = res_actual[0]
                 venc_bd = datetime.strptime(res_actual[1], "%Y-%m-%d").date()
+                foto_bd = res_actual[2]
+                
                 if plan == plan_bd:
                     vencimiento = venc_bd
+                
+                foto_final = self.ruta_foto_actual if self.ruta_foto_actual != "" else foto_bd
+        else:
+            foto_final = self.ruta_foto_actual
 
         if vencimiento is None:
             cursor.execute("SELECT dias_duracion FROM planes_config WHERE nombre=?", (plan,))
@@ -498,27 +570,28 @@ class MiembrosFrame(ctk.CTkFrame):
 
         try:
             if id_actual:
-                # Actualizamos al socio
                 cursor.execute('''UPDATE miembros SET 
                                 nombre=?, apellidos=?, telefono=?, telefono_emergencia=?, email=?, 
-                                enfermedad=?, detalles_enfermedad=?, tipo_plan=?, usa_locker=?, fecha_vencimiento=?, estatus=? 
+                                enfermedad=?, detalles_enfermedad=?, tipo_plan=?, usa_locker=?, fecha_vencimiento=?, estatus=?,
+                                ruta_foto=? 
                                 WHERE id=?''', 
                                (self.var_nombre.get(), self.var_apellidos.get(), self.var_telefono.get(), 
                                 self.var_emergencia.get(), self.var_email.get(), self.var_enfermedad.get(), 
-                                detalles_enf, plan, usa_locker, vencimiento.strftime("%Y-%m-%d"), self.var_estatus.get(), id_actual))
-                id_para_pago = id_actual # Usamos el ID que ya tenía
+                                detalles_enf, plan, usa_locker, vencimiento.strftime("%Y-%m-%d"), self.var_estatus.get(), 
+                                foto_final, id_actual))
+                id_para_pago = id_actual
             else:
-                # Registramos al socio nuevo
                 cursor.execute('''INSERT INTO miembros 
-                                (nombre, apellidos, telefono, telefono_emergencia, email, enfermedad, detalles_enfermedad, tipo_plan, usa_locker, fecha_registro, fecha_vencimiento, estatus)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                (nombre, apellidos, telefono, telefono_emergencia, email, enfermedad, detalles_enfermedad, tipo_plan, usa_locker, fecha_registro, fecha_vencimiento, estatus, ruta_foto)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                                (self.var_nombre.get(), self.var_apellidos.get(), self.var_telefono.get(), 
                                 self.var_emergencia.get(), self.var_email.get(), self.var_enfermedad.get(), 
-                                detalles_enf, plan, usa_locker, hoy.strftime("%Y-%m-%d"), vencimiento.strftime("%Y-%m-%d"), "Activo"))
-                id_para_pago = cursor.lastrowid # Obtenemos el ID que la BD le acaba de asignar
+                                detalles_enf, plan, usa_locker, hoy.strftime("%Y-%m-%d"), vencimiento.strftime("%Y-%m-%d"), "Activo",
+                                foto_final))
+                id_para_pago = cursor.lastrowid
             
-            # --- NUEVO: GUARDAR EL DINERO EN LA TABLA DE PAGOS ---
-            if total_pagado > 0: # Solo si no fue cortesía
+            # --- TICKETS, PAGOS Y NOTIFICACIONES INTELIGENTES ---
+            if total_pagado > 0:
                 fecha_hora_exacta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 cursor.execute('''INSERT INTO pagos (miembro_id, concepto, monto, metodo_pago, fecha_hora) 
                                   VALUES (?, ?, ?, ?, ?)''',
@@ -526,11 +599,26 @@ class MiembrosFrame(ctk.CTkFrame):
             
             conn.commit()
             
-            nombre_cliente = f"{self.var_nombre.get()} {self.var_apellidos.get()}"
-            self.generar_ticket(nombre_cliente, plan, monto_plan, monto_locker, metodo_pago, vencimiento.strftime("%d/%m/%Y"))
+            # Si NO es solo una actualización de datos (es decir, hubo dinero o fue cortesía)
+            if metodo_pago != "Actualización":
+                fecha_hora_exacta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Registramos en la 'bóveda' de pagos, aunque el monto sea 0.0
+                cursor.execute('''INSERT INTO pagos (miembro_id, concepto, monto, metodo_pago, fecha_hora) 
+                                  VALUES (?, ?, ?, ?, ?)''',
+                               (id_para_pago, concepto_venta, total_pagado, metodo_pago, fecha_hora_exacta))
+                
+                # Generamos el ticket físico
+                nombre_cliente = f"{self.var_nombre.get()} {self.var_apellidos.get()}"
+                self.generar_ticket(nombre_cliente, plan, monto_plan, monto_locker, metodo_pago, vencimiento.strftime("%d/%m/%Y"), concepto_venta)
+                
+                messagebox.showinfo("Éxito", f"Operación registrada: {concepto_venta}\nTicket generado.")
+            else:
+                # Si solo entró aquí para cambiar la foto o el teléfono, no genera registro en pagos
+                messagebox.showinfo("Éxito", "Datos del socio actualizados correctamente.")
             
-            messagebox.showinfo("Éxito", "Cobro realizado y socio guardado.\nTicket generado.")
-            self.mostrar_lista() 
+            conn.commit()
+            self.mostrar_lista()
             
         except Exception as e:
             self.lbl_error_bd.configure(text="Error al guardar en base de datos.")
@@ -538,17 +626,19 @@ class MiembrosFrame(ctk.CTkFrame):
         finally:
             conn.close()
 
-    def generar_ticket(self, nombre_cliente, plan, monto_plan, monto_locker, metodo_pago, fecha_vencimiento):
-        # Esta función crea un archivo .txt con formato de ticket de impresora térmica (58mm/80mm)
+    def generar_ticket(self, nombre_cliente, plan, monto_plan, monto_locker, metodo_pago, fecha_vencimiento, concepto_venta):
+        # Esta función crea un archivo .txt con formato de ticket
         fecha_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         total = monto_plan + monto_locker
         
         ticket = f"""
 ================================
-          SportLife GYM           
+          GOCHI'S GYM           
 ================================
 Fecha: {fecha_hora}
 Socio: {nombre_cliente}
+
+>> MOVIMIENTO: {concepto_venta.upper()} <<
 
 --- DESGLOSE DE COMPRA ---
 Plan: {plan}
@@ -575,7 +665,6 @@ medico antes de entrenar.
 ¡GRACIAS POR TU PREFERENCIA!
 ================================
 """
-        # Guardamos el ticket en una carpeta local (simulando la impresión)
         if not os.path.exists("tickets"):
             os.makedirs("tickets")
             
@@ -584,8 +673,6 @@ medico antes de entrenar.
             file.write(ticket)
             
         print(f"Ticket generado en: {nombre_archivo}")
-        # En el futuro, aquí enviaremos este texto directo al puerto USB/COM de la impresora térmica.
-
     def editar_socio(self, event):
         item_seleccionado = self.tabla.focus()
         if item_seleccionado:
@@ -596,11 +683,24 @@ medico antes de entrenar.
     def cargar_datos_socio(self, id_socio):
         conn = sqlite3.connect('gimnasio.db')
         cursor = conn.cursor()
+        
+        # 1. Traemos los datos normales del formulario
         cursor.execute("SELECT * FROM miembros WHERE id=?", (id_socio,))
         fila = cursor.fetchone()
+        
+        # --- NUEVO: BÚSQUEDA BLINDADA DE LA FOTO ---
+        # Al pedirla por su nombre exacto, ya no importa si se movió de la celda 13 a la 15
+        try:
+            cursor.execute("SELECT ruta_foto FROM miembros WHERE id=?", (id_socio,))
+            res_foto = cursor.fetchone()
+            ruta_foto_db = res_foto[0] if res_foto and res_foto[0] else ""
+        except sqlite3.OperationalError:
+            ruta_foto_db = "" # Por si la columna llegara a fallar
+            
         conn.close()
 
         if fila:
+            # Llenamos los campos de texto
             self.var_id.set(fila[0])
             self.var_nombre.set(fila[1])
             self.var_apellidos.set(fila[2])
@@ -615,7 +715,7 @@ medico antes de entrenar.
                 self.txt_detalles.insert("1.0", fila[7])
                 
             plan_guardado = fila[8]
-            locker_guardado = fila[9] # Recuperamos si tiene locker (Sí o No)
+            locker_guardado = fila[9]
             vencimiento_str = fila[11] 
             vencimiento_date = datetime.strptime(vencimiento_str, "%Y-%m-%d").date()
             hoy = datetime.now().date()
@@ -625,8 +725,128 @@ medico antes de entrenar.
                 self.actualizar_costo_plan("Seleccionar...")
             else:
                 self.var_plan.set(plan_guardado)
-                self.var_locker.set(locker_guardado) # Prendemos o apagamos el switch
+                self.var_locker.set(locker_guardado)
                 self.actualizar_costo_plan(plan_guardado)
             
             self.var_estatus.set(fila[12])
+
+            # --- LA MAGIA DE LA FOTO ---
+            print("\n--- DEBUG FOTO (BLINDADO) ---")
+            print(f"1. ID Socio: {id_socio}")
+            print(f"2. Ruta segura encontrada: '{ruta_foto_db}'")
+            if ruta_foto_db:
+                print(f"3. ¿Existe archivo?: {os.path.exists(ruta_foto_db)}")
+            print("-----------------------------\n")
+            
+            if ruta_foto_db and os.path.exists(ruta_foto_db):
+                try:
+                    with Image.open(ruta_foto_db) as img_pil:
+                        alto, ancho = img_pil.size
+                        min_dim = min(alto, ancho)
+                        left = (ancho - min_dim) / 2
+                        top = (alto - min_dim) / 2
+                        right = (ancho + min_dim) / 2
+                        bottom = (alto + min_dim) / 2
+                        img_recortada = img_pil.crop((left, top, right, bottom))
+                        img_recortada = img_recortada.resize((200, 200))
+                        
+                        self.imagen_actual_tk = ctk.CTkImage(light_image=img_recortada, dark_image=img_recortada, size=(200, 200))
+                        
+                    self.lbl_video.configure(image=self.imagen_actual_tk, text="", require_redraw=True)
+                    self.lbl_estado_foto.configure(text="Foto del Socio", text_color="white")
+                    self.btn_encender_cam.configure(text="🔄 Cambiar Foto")
+
+                except Exception as e:
+                    print(f"Error al cargar la foto física: {e}")
+                    self.lbl_video.configure(image="", text="Error Visual", require_redraw=True)
+            else:
+                self.lbl_video.configure(image="", text="Socio sin Foto", require_redraw=True)
+                self.lbl_estado_foto.configure(text="")
+                self.btn_encender_cam.configure(text="📷 Tomar Foto")
+            
             self.validar_formulario()
+    # ==========================================
+    # FUNCIONES DE LA CÁMARA WEB
+    # ==========================================
+    def iniciar_camara(self):
+        # 0 es la laptop. Cuando llegue la Logitech, si no la agarra a la primera, lo cambias a 1 o 2.
+        self.captura = cv2.VideoCapture(0)
+        if self.captura.isOpened():
+            self.btn_encender_cam.configure(state="disabled")
+            self.btn_tomar_foto.configure(state="normal")
+            self.actualizar_frame()
+        else:
+            messagebox.showerror("Error", "No se detectó ninguna cámara conectada.")
+
+    def actualizar_frame(self):
+        if self.captura and self.captura.isOpened():
+            exito, frame = self.captura.read()
+            if exito:
+                # Convertir los colores de OpenCV (BGR) a colores de Pantalla (RGB)
+                cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img = Image.fromarray(cv2image)
+                
+                # Recortamos la imagen a cuadrado para que se vea estético (como foto de perfil)
+                alto, ancho = img.size
+                min_dim = min(alto, ancho)
+                left = (ancho - min_dim) / 2
+                top = (alto - min_dim) / 2
+                right = (ancho + min_dim) / 2
+                bottom = (alto + min_dim) / 2
+                img = img.crop((left, top, right, bottom))
+                
+                # Redimensionamos al tamaño de nuestro recuadro
+                img = img.resize((200, 200))
+                
+                # La mandamos a CustomTkinter
+                self.imagen_actual_tk = ctk.CTkImage(light_image=img, dark_image=img, size=(200, 200))
+                self.lbl_video.configure(image=self.imagen_actual_tk, text="")
+                
+            # Esto es lo que reemplaza al 'while': se llama a sí mismo cada 15 milisegundos
+            self.lbl_video.after(15, self.actualizar_frame)
+
+    def tomar_foto(self):
+        if self.captura and self.captura.isOpened():
+            exito, frame = self.captura.read()
+            if exito:
+                # 1. Guardamos físicamente en la carpeta
+                if not os.path.exists("fotos_socios"):
+                    os.makedirs("fotos_socios")
+                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                self.ruta_foto_actual = f"fotos_socios/foto_{timestamp}.jpg"
+                cv2.imwrite(self.ruta_foto_actual, frame)
+                
+                self.apagar_camara()
+                
+                # 2. NUEVO: Forzar el congelamiento visual perfecto en la pantalla
+                try:
+                    # Convertimos los colores de la cámara para que se vean bien
+                    cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    img_pil = Image.fromarray(cv2image)
+                    
+                    # Recortamos a cuadrado exacto
+                    alto, ancho = img_pil.size
+                    min_dim = min(alto, ancho)
+                    left = (ancho - min_dim) / 2
+                    top = (alto - min_dim) / 2
+                    right = (ancho + min_dim) / 2
+                    bottom = (alto + min_dim) / 2
+                    img_pil = img_pil.crop((left, top, right, bottom))
+                    img_pil = img_pil.resize((200, 200))
+                    
+                    # Lo pegamos en la interfaz
+                    self.imagen_actual_tk = ctk.CTkImage(light_image=img_pil, dark_image=img_pil, size=(200, 200))
+                    self.lbl_video.configure(image=self.imagen_actual_tk, text="", require_redraw=True)
+                except Exception as e:
+                    print(f"Error al congelar imagen en UI: {e}")
+
+                self.lbl_estado_foto.configure(text="¡Foto Capturada!", text_color="#2ecc71")
+                
+                
+    def apagar_camara(self):
+        if self.captura:
+            self.captura.release()
+            self.captura = None
+        self.btn_encender_cam.configure(state="normal")
+        self.btn_tomar_foto.configure(state="disabled")

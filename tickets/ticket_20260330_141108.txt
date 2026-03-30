@@ -1,17 +1,19 @@
 
 ================================
-          SportLife GYM           
+          GOCHI'S GYM           
 ================================
-Fecha: 27/03/2026 20:17:39
-Socio: Rosa Elena Morales Diaz
+Fecha: 30/03/2026 14:11:08
+Socio: Chata Gomez
+
+>> MOVIMIENTO: RENOVACIÓN DE MEMBRESÍA <<
 
 --- DESGLOSE DE COMPRA ---
 Plan: Semana
 Subtotal Membresia: $150.00
 --------------------------------
 TOTAL A PAGAR:      $150.00
-Metodo de Pago:     Efectivo
-Vencimiento Plan:   01/03/2026
+Metodo de Pago:     Tarjeta
+Vencimiento Plan:   29/03/2026
 --------------------------------
 
 ALERTA Y EXENCION DE RESPONSABILIDAD:

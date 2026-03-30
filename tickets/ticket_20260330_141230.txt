@@ -1,9 +1,11 @@
 
 ================================
-          SportLife GYM           
+          GOCHI'S GYM           
 ================================
-Fecha: 27/03/2026 20:18:58
-Socio: Ginger Gomez
+Fecha: 30/03/2026 14:12:30
+Socio: Rosa Morales
+
+>> MOVIMIENTO: CORTESÍA (VISITA GRATIS) <<
 
 --- DESGLOSE DE COMPRA ---
 Plan: Primera Visita
@@ -11,7 +13,7 @@ Subtotal Membresia: $0.00
 --------------------------------
 TOTAL A PAGAR:      $0.00
 Metodo de Pago:     Cortesía
-Vencimiento Plan:   27/03/2026
+Vencimiento Plan:   30/03/2026
 --------------------------------
 
 ALERTA Y EXENCION DE RESPONSABILIDAD:

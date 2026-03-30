@@ -1,18 +1,19 @@
 
 ================================
-          SportLife GYM           
+          GOCHI'S GYM           
 ================================
-Fecha: 27/03/2026 19:42:50
-Socio: Ron Gomez Morales
+Fecha: 30/03/2026 14:55:30
+Socio: Eduardo Mondragon
+
+>> MOVIMIENTO: CORTESÍA (VISITA GRATIS) <<
 
 --- DESGLOSE DE COMPRA ---
-Plan: Mensualidad
-Subtotal Membresia: $400.00
-Subtotal Locker:    $50.00
+Plan: Primera Visita
+Subtotal Membresia: $0.00
 --------------------------------
-TOTAL A PAGAR:      $450.00
-Metodo de Pago:     Efectivo
-Vencimiento Plan:   26/04/2026
+TOTAL A PAGAR:      $0.00
+Metodo de Pago:     Cortesía
+Vencimiento Plan:   30/03/2026
 --------------------------------
 
 ALERTA Y EXENCION DE RESPONSABILIDAD:

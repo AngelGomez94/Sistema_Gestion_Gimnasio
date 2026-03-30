@@ -84,5 +84,12 @@ def setup_db():
             fecha_hora DATETIME NOT NULL
         )
     ''')
+    # 6. ACTUALIZACIÓN: Agregar columna para la ruta de la foto si no existe
+    try:
+        cursor.execute("ALTER TABLE miembros ADD COLUMN ruta_foto TEXT")
+        print("Columna 'ruta_foto' agregada exitosamente.")
+    except sqlite3.OperationalError:
+        # Si la columna ya existe, SQLite marcará error, lo atrapamos y no hacemos nada.
+        pass
     conn.commit() 
     conn.close()

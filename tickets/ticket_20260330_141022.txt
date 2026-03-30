@@ -1,17 +1,19 @@
 
 ================================
-          SportLife GYM           
+          GOCHI'S GYM           
 ================================
-Fecha: 27/03/2026 19:50:39
-Socio: Miguel Herrera
+Fecha: 30/03/2026 14:10:22
+Socio: Ana valeria Gomez Morales
+
+>> MOVIMIENTO: NUEVA MEMBRESÍA <<
 
 --- DESGLOSE DE COMPRA ---
-Plan: Semana
-Subtotal Membresia: $150.00
+Plan: Mensualidad
+Subtotal Membresia: $400.00
 --------------------------------
-TOTAL A PAGAR:      $150.00
+TOTAL A PAGAR:      $400.00
 Metodo de Pago:     Efectivo
-Vencimiento Plan:   03/04/2026
+Vencimiento Plan:   29/04/2026
 --------------------------------
 
 ALERTA Y EXENCION DE RESPONSABILIDAD:
