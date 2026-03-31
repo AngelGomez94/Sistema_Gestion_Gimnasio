@@ -1,5 +1,6 @@
 import customtkinter as ctk
 from modulo_miembros import MiembrosFrame # Importamos el módulo de miembros
+from modulo_inventario import InventarioFrame
 
 class MainWindow(ctk.CTk):
     def __init__(self):
@@ -89,7 +90,7 @@ class MainWindow(ctk.CTk):
 
     # --- FUNCIONES DE LA VENTANA ---
     def abrir_modulo(self, nombre_modulo):
-        # Limpiamos el main_frame (destruimos lo que haya adentro)
+        # Limpiamos el main_frame
         for widget in self.main_frame.winfo_children():
             widget.destroy()
             
@@ -97,9 +98,13 @@ class MainWindow(ctk.CTk):
         if "Miembros" in nombre_modulo:
             vista = MiembrosFrame(self.main_frame)
             vista.pack(fill="both", expand=True)
+        elif "Inventario" in nombre_modulo: # --- NUEVO CÓDIGO ---
+            vista = InventarioFrame(self.main_frame)
+            vista.pack(fill="both", expand=True)
         else:
             lbl = ctk.CTkLabel(self.main_frame, text=f"Módulo: {nombre_modulo}\n(En construcción)", font=("Arial", 24))
             lbl.pack(expand=True)
+
 
     def maximizar_ventana(self):
         try:

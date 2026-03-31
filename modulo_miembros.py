@@ -6,6 +6,8 @@ import os
 from modal_cobro import ModalCobro
 import cv2
 from PIL import Image
+import win32api
+import win32print
 
 class MiembrosFrame(ctk.CTkFrame):
     def __init__(self, parent):
@@ -633,7 +635,7 @@ class MiembrosFrame(ctk.CTkFrame):
         
         ticket = f"""
 ================================
-          GOCHI'S GYM           
+          SportLife GYM           
 ================================
 Fecha: {fecha_hora}
 Socio: {nombre_cliente}
@@ -669,10 +671,51 @@ medico antes de entrenar.
             os.makedirs("tickets")
             
         nombre_archivo = f"tickets/ticket_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        with open(nombre_archivo, "w", encoding="utf-8") as file:
+        
+        # Guardamos la ruta absoluta para que Windows no se pierda al imprimir
+        ruta_absoluta = os.path.abspath(nombre_archivo)
+
+        with open(ruta_absoluta, "w", encoding="utf-8") as file:
             file.write(ticket)
             
-        print(f"Ticket generado en: {nombre_archivo}")
+        print(f"Ticket generado en: {ruta_absoluta}")
+        
+        # --- NUEVA LÓGICA DE IMPRESIÓN FÍSICA ---
+        # --- NUEVA LÓGICA DE IMPRESIÓN FÍSICA (MÉTODO RAW) ---
+        try:
+            impresora_actual = win32print.GetDefaultPrinter()
+            print(f"Enviando en formato RAW a: {impresora_actual}")
+            
+            # 1. Abrimos la conexión directa con el hardware de la impresora
+            hPrinter = win32print.OpenPrinter(impresora_actual)
+            try:
+                # 2. Le indicamos al sistema que le mandaremos bytes crudos (RAW), sin formatos de Windows
+                hJob = win32print.StartDocPrinter(hPrinter, 1, ("Ticket Gimnasio", "", "RAW"))
+                win32print.StartPagePrinter(hPrinter)
+                
+                # 3. Agregamos saltos de línea al final del ticket. 
+                # Esto es VITAL para que el papel avance lo suficiente y puedas cortarlo sin rasgar las letras.
+                ticket_final = ticket + "\n\n\n\n\n"
+                
+                # 4. Convertimos el texto a bytes. 
+                # Usamos 'latin-1' (o podrías probar 'cp850') porque es la codificación nativa que 
+                # usan la mayoría de estas impresoras para que los acentos y la "ñ" salgan bien.
+                datos_crudos = ticket_final.encode("latin-1", errors="replace")
+                
+                # 5. Disparamos los datos directo a la impresora térmica
+                win32print.WritePrinter(hPrinter, datos_crudos)
+                
+                # 6. Cerramos el trabajo de impresión
+                win32print.EndPagePrinter(hPrinter)
+                win32print.EndDocPrinter(hPrinter)
+            finally:
+                # Siempre liberamos la impresora, incluso si hay error
+                win32print.ClosePrinter(hPrinter)
+                
+            print("Ticket impreso correctamente en formato térmico.")
+            
+        except Exception as e:
+            print(f"Error al intentar imprimir físicamente: {e}")
     def editar_socio(self, event):
         item_seleccionado = self.tabla.focus()
         if item_seleccionado:
@@ -769,14 +812,21 @@ medico antes de entrenar.
     # FUNCIONES DE LA CÁMARA WEB
     # ==========================================
     def iniciar_camara(self):
-        # 0 es la laptop. Cuando llegue la Logitech, si no la agarra a la primera, lo cambias a 1 o 2.
-        self.captura = cv2.VideoCapture(0)
+        # 1. Agregamos cv2.CAP_DSHOW para saltarnos el motor lento de Windows
+        self.captura = cv2.VideoCapture(1, cv2.CAP_DSHOW)
+        
         if self.captura.isOpened():
+            # 2. Forzamos una resolución baja (VGA) al arrancar. 
+            # Esto evita que la cámara intente arrancar en 1080p o 4K, haciendo que abra en milisegundos.
+            self.captura.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.captura.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            
             self.btn_encender_cam.configure(state="disabled")
             self.btn_tomar_foto.configure(state="normal")
             self.actualizar_frame()
         else:
-            messagebox.showerror("Error", "No se detectó ninguna cámara conectada.")
+            # Si el puerto 1 falla (a veces Windows reasigna los puertos USB), que te avise claro.
+            messagebox.showerror("Error", "No se detectó la cámara USB en el puerto 1. Revisa la conexión.")
 
     def actualizar_frame(self):
         if self.captura and self.captura.isOpened():

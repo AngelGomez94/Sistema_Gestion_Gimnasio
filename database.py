@@ -91,5 +91,16 @@ def setup_db():
     except sqlite3.OperationalError:
         # Si la columna ya existe, SQLite marcará error, lo atrapamos y no hacemos nada.
         pass
+
+    # 7. NUEVA TABLA: Inventario de Productos (Punto de Venta)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS inventario (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            cantidad INTEGER NOT NULL DEFAULT 0,
+            costo_compra REAL NOT NULL DEFAULT 0.0,
+            costo_venta REAL NOT NULL DEFAULT 0.0
+        )
+    ''')
     conn.commit() 
     conn.close()
