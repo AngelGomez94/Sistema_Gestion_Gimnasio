@@ -2,10 +2,10 @@
 ================================
           SportLife GYM           
 ================================
-Fecha: 30/03/2026 20:59:22
-Socio: Sofia Nuñez Gomez
+Fecha: 11/04/2026 13:53:00
+Socio: Rosa Morales Diaz
 
->> MOVIMIENTO: NUEVA MEMBRESÍA <<
+>> MOVIMIENTO: RENOVACIÓN DE MEMBRESÍA <<
 
 --- DESGLOSE DE COMPRA ---
 Plan: Mensualidad
@@ -13,8 +13,8 @@ Subtotal Membresia: $400.00
 Subtotal Locker:    $50.00
 --------------------------------
 TOTAL A PAGAR:      $450.00
-Metodo de Pago:     Efectivo
-Vencimiento Plan:   29/04/2026
+Metodo de Pago:     Tarjeta
+Vencimiento Plan:   14/05/2026
 --------------------------------
 
 ALERTA Y EXENCION DE RESPONSABILIDAD:

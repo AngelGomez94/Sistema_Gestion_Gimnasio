@@ -1,0 +1,29 @@
+
+================================
+          SportLife GYM           
+================================
+Fecha: 14/04/2026 12:58:07
+Socio: Erick Cartman
+
+>> MOVIMIENTO: NUEVA MEMBRESÍA <<
+
+--- DESGLOSE DE COMPRA ---
+Plan: Visita
+Subtotal Membresia: $50.00
+--------------------------------
+TOTAL A PAGAR:      $50.00
+Metodo de Pago:     Efectivo
+Vencimiento Plan:   14/04/2026
+--------------------------------
+
+ALERTA Y EXENCION DE RESPONSABILIDAD:
+El uso de las instalaciones es bajo su 
+propio riesgo. El gimnasio no se hace 
+responsable por lesiones, problemas de 
+salud o incidentes derivados del uso de 
+suplementos, bebidas energeticas o 
+sobreesfuerzo fisico. Consulte a su 
+medico antes de entrenar.
+
+¡GRACIAS POR TU PREFERENCIA!
+================================

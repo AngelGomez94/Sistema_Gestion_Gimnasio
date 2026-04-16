@@ -1,19 +1,20 @@
 
 ================================
-          GOCHI'S GYM           
+          SportLife GYM           
 ================================
-Fecha: 30/03/2026 16:14:45
-Socio: Sofia Nuñez
+Fecha: 04/04/2026 11:45:19
+Socio: Andres Angel Gomez Morales
 
 >> MOVIMIENTO: NUEVA MEMBRESÍA <<
 
 --- DESGLOSE DE COMPRA ---
-Plan: Semana
-Subtotal Membresia: $150.00
+Plan: Mensualidad
+Subtotal Membresia: $850.00
+Mantenimiento Anual: $450.00
 --------------------------------
-TOTAL A PAGAR:      $150.00
+TOTAL A PAGAR:      $850.00
 Metodo de Pago:     Tarjeta
-Vencimiento Plan:   06/04/2026
+Vencimiento Plan:   04/05/2026
 --------------------------------
 
 ALERTA Y EXENCION DE RESPONSABILIDAD:

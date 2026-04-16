@@ -1,19 +1,21 @@
 
 ================================
-          GOCHI'S GYM           
+          SportLife GYM           
 ================================
-Fecha: 30/03/2026 20:51:28
-Socio: Ana Valeria Gomez Morales
+Fecha: 14/04/2026 13:00:58
+Socio: Wendy March
 
->> MOVIMIENTO: RENOVACIÓN DE MEMBRESÍA <<
+>> MOVIMIENTO: NUEVA MEMBRESÍA <<
 
 --- DESGLOSE DE COMPRA ---
-Plan: Visita
-Subtotal Membresia: $50.00
+Plan: Mensualidad
+Subtotal Membresia: $350.75
+Mantenimiento Anual: $0.75
+Subtotal Locker:    $50.00
 --------------------------------
-TOTAL A PAGAR:      $50.00
+TOTAL A PAGAR:      $400.75
 Metodo de Pago:     Tarjeta
-Vencimiento Plan:   30/03/2026
+Vencimiento Plan:   14/05/2026
 --------------------------------
 
 ALERTA Y EXENCION DE RESPONSABILIDAD:

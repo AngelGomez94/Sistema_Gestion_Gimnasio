@@ -6,8 +6,13 @@ import os
 from modal_cobro import ModalCobro
 import cv2
 from PIL import Image
-import win32api
 import win32print
+import threading
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+
 
 class MiembrosFrame(ctk.CTkFrame):
     def __init__(self, parent):
@@ -25,6 +30,8 @@ class MiembrosFrame(ctk.CTkFrame):
         self.var_locker = ctk.StringVar(value="No") # NUEVA VARIABLE PARA LOCKER
         self.var_estatus = ctk.StringVar(value="Activo")
         self.var_busqueda = ctk.StringVar()
+        self.var_anio_mantenimiento = ctk.IntVar(value=0) # Para saber qué año pagó por última vez
+        self.monto_mantenimiento_actual = 0.0 # Para guardar el cálculo del prorrateo y pasarlo al ticket
 
         for var in [self.var_nombre, self.var_apellidos, self.var_telefono, self.var_emergencia, self.var_email, self.var_enfermedad, self.var_plan, self.var_estatus]:
             var.trace_add("write", self.validar_formulario)
@@ -289,8 +296,8 @@ class MiembrosFrame(ctk.CTkFrame):
     # LÓGICA DE NEGOCIO 
     # ==========================================
     def actualizar_costo_plan(self, valor_seleccionado):
-        # 1. CANDADO DEL LOCKER: Solo se habilita si es Mensualidad
-        if valor_seleccionado == "Mensualidad":
+        # 1. CANDADO DEL LOCKER
+        if valor_seleccionado in ["Mensualidad", "Anualidad"]:
             self.switch_locker.configure(state="normal")
         else:
             self.var_locker.set("No")
@@ -298,36 +305,78 @@ class MiembrosFrame(ctk.CTkFrame):
 
         if valor_seleccionado == "Seleccionar...":
             self.lbl_costo_plan.configure(text="")
+            self.monto_mantenimiento_actual = 0.0
             return
 
-        # 2. CALCULAR COSTO TOTAL (PLAN + LOCKER)
-        conn = sqlite3.connect('gimnasio.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT costo FROM planes_config WHERE nombre=?", (valor_seleccionado,))
-        resultado = cursor.fetchone()
-        conn.close()
+        # 2. CONSULTAR COSTOS EN BD (BLINDADO)
+        try:
+            conn = sqlite3.connect('gimnasio.db')
+            cursor = conn.cursor()
+            cursor.execute("SELECT costo FROM planes_config WHERE nombre=?", (valor_seleccionado,))
+            res_plan = cursor.fetchone()
 
-        if resultado:
-            costo_base = resultado[0]
-            if costo_base == 0:
-                self.lbl_costo_plan.configure(text="¡Cortesía! Costo: $0.00 MXN", text_color="#2ecc71")
+            try:
+                cursor.execute("SELECT costo_locker, costo_mantenimiento FROM configuracion LIMIT 1")
+                res_config = cursor.fetchone()
+                costo_mantenimiento_db = res_config[1] if res_config and len(res_config) > 1 else 0.0
+            except sqlite3.OperationalError:
+                cursor.execute("SELECT costo_locker FROM configuracion LIMIT 1")
+                res_config = cursor.fetchone()
+                costo_mantenimiento_db = 0.0
+
+            conn.close()
+        except Exception as e:
+            print(f"Error al consultar BD: {e}")
+            return
+
+        costo_base = res_plan[0] if res_plan else 0.0
+        costo_locker_db = res_config[0] if res_config else 0.0
+        costo_locker = costo_locker_db if self.var_locker.get() == "Si" else 0.0
+        self.monto_mantenimiento_actual = 0.0
+
+        # --- 3. LÓGICA DE MANTENIMIENTO ANUAL (REGLA DEL DÍA 1) ---
+        hoy = datetime.now()
+        
+        # Validamos el "sello" del año. Si la variable falla o no existe, asumimos que no ha pagado (False).
+        try:
+            mantenimiento_pagado = self.var_anio_mantenimiento.get() >= hoy.year
+        except AttributeError:
+            mantenimiento_pagado = False 
+
+        if not mantenimiento_pagado:
+            if valor_seleccionado == "Anualidad":
+                # Regla: Anualidad paga el 100% SIEMPRE
+                self.monto_mantenimiento_actual = costo_mantenimiento_db
+                
+            elif valor_seleccionado == "Mensualidad":
+                # Regla: Mensualidad paga el prorrateo del mes actual hasta Diciembre
+                meses_restantes = 12 - hoy.month + 1
+                self.monto_mantenimiento_actual = (costo_mantenimiento_db / 12) * meses_restantes
             else:
-                costo_total = costo_base
-                texto_desglose = f"Plan: ${costo_base:.2f}"
-                
-                if self.var_locker.get() == "Si":
-                    costo_locker = self.obtener_costo_locker()
-                    costo_total += costo_locker
-                    texto_desglose = f"Plan + Locker: ${costo_total:.2f}"
-                else:
-                    texto_desglose = f"Total a cobrar: ${costo_total:.2f} MXN"
+                # Visitas, Cortesías o planes casuales se salvan
+                self.monto_mantenimiento_actual = 0.0
+        else:
+            # Si ya pagó el año actual, lo dejamos en paz
+            self.monto_mantenimiento_actual = 0.0
 
-                self.lbl_costo_plan.configure(text=texto_desglose, text_color="white")
+        # --- 4. CALCULAR TOTAL Y MOSTRAR DESGLOSE ---
+        costo_total = costo_base + costo_locker + self.monto_mantenimiento_actual
+
+        if costo_base == 0:
+            self.lbl_costo_plan.configure(text="¡Cortesía! Costo: $0.00 MXN", text_color="#2ecc71")
+        else:
+            texto_desglose = f"Plan: ${costo_base:.2f}"
+            if costo_locker > 0:
+                texto_desglose += f" | Locker: ${costo_locker:.2f}"
+            if self.monto_mantenimiento_actual > 0:
+                texto_desglose += f" | Mant: ${self.monto_mantenimiento_actual:.2f}"
                 
-                # --- NUEVA MAGIA: AUTO-REACTIVACIÓN ---
-                # Si el plan cuesta dinero y estamos editando un socio existente, lo revivimos.
-                if self.var_id.get() != "": 
-                    self.var_estatus.set("Activo")
+            texto_desglose += f"\nTotal: ${costo_total:.2f} MXN"
+            
+            self.lbl_costo_plan.configure(text=texto_desglose, text_color="white")
+            
+            if self.var_id.get() != "": 
+                self.var_estatus.set("Activo")
 
     def mostrar_lista(self):
         self.apagar_camara() # Aseguramos apagar la cámara si estaba encendida
@@ -359,6 +408,7 @@ class MiembrosFrame(ctk.CTkFrame):
         if id_socio is None:
             self.lbl_titulo_form.configure(text="Registrar Nuevo Socio")
             self.btn_guardar.configure(text="Guardar Socio")
+            self.var_anio_mantenimiento.set(0) # <--- NUEVA LÍNEA: Reiniciamos la memoria del año
             self.lbl_estatus.grid_remove()
             self.combo_estatus.grid_remove()
             
@@ -490,7 +540,7 @@ class MiembrosFrame(ctk.CTkFrame):
             if res_locker:
                 monto_locker = res_locker[0]
 
-        # --- NUEVA LÓGICA: ¿Es Venta o solo Actualización de Datos? ---
+        # --- LÓGICA DE UMBRALES DE RENOVACIÓN ---
         es_renovacion = True
         if id_actual:
             cursor.execute("SELECT tipo_plan, fecha_vencimiento, usa_locker FROM miembros WHERE id=?", (id_actual,))
@@ -501,28 +551,83 @@ class MiembrosFrame(ctk.CTkFrame):
                 locker_bd = res_actual[2]
                 hoy = datetime.now().date()
                 
-                # Si no ha cambiado de plan y aún está vigente, NO le volvemos a cobrar
-                if plan == plan_bd and venc_bd >= hoy:
+                # Definimos los días de anticipación permitidos para renovar
+                umbrales = {
+                    "Mensualidad": 5,
+                    "Anualidad": 15,
+                    "Semana": 1,
+                    "Visita": 0
+                }
+                
+                umbral = umbrales.get(plan, 0)
+                dias_restantes = (venc_bd - hoy).days
+                
+                # REGLA: Si es el mismo plan y faltan MÁS días que el umbral, no cobramos (es solo edición)
+                if plan == plan_bd and dias_restantes > umbral:
                     monto_plan = 0.0
                 
-                # Si ya tenía el locker y lo mantiene, NO le volvemos a cobrar el locker
+                # Regla del Locker: Si ya lo tenía y no ha cambiado el estatus, no cobramos
                 if self.var_locker.get() == "Si" and locker_bd == "Si":
-                    monto_locker = 0.0
-                    
-                # Si ambos montos bajan a cero, es solo una actualización (ej. ponerle foto)
+                    # Solo cobramos el locker si el plan también se está renovando
+                    if monto_plan == 0.0:
+                        monto_locker = 0.0
+                
                 if monto_plan == 0.0 and monto_locker == 0.0:
                     es_renovacion = False
 
         conn.close()
-        total = monto_plan + monto_locker
+        
+        # El total de la operación incluye el mantenimiento si es que aplica
+        total_operacion = monto_plan + monto_locker + self.monto_mantenimiento_actual
 
-        if total > 0:
-            # Solo abrimos la caja si hay algo que cobrar
-            ModalCobro(self.winfo_toplevel(), monto_plan, monto_locker, self.ejecutar_guardado_bd)
+        if total_operacion > 0:
+            total_plan_y_mant = monto_plan + self.monto_mantenimiento_actual
+            ModalCobro(self.winfo_toplevel(), total_plan_y_mant, monto_locker, self.ejecutar_guardado_bd)
         else:
-            # Si el total es 0, brincamos directo a guardar los datos (silenciosamente)
             motivo = "Actualización" if id_actual and not es_renovacion else "Cortesía"
             self.ejecutar_guardado_bd(motivo, "0", 0.0, 0.0)
+
+    def enviar_correo_background(self, concepto, monto, nombre_cliente, plan):
+        # Esta función corre en su propio carril invisible
+        try:
+            remitente = "notificacionessportlife@gmail.com" # El correo que crees para el gym
+            password = "klcccpcccuzwkyue" # Ojo, no es tu password normal
+            destinatario = "angelgomez140994@gmail.com"
+
+            # 1. Armamos la carta
+            mensaje = MIMEMultipart()
+            mensaje['From'] = remitente
+            mensaje['To'] = destinatario
+            mensaje['Subject'] = f"Notificación de Caja: {concepto}"
+
+            cuerpo = f"""
+            Hola Administrador,
+            Se ha registrado un nuevo movimiento en caja:
+            
+            Cliente: {nombre_cliente}
+            Operación: {concepto}
+            Plan: {plan}
+            Total Cobrado: ${monto} MXN
+            
+            Este es un mensaje automático del Sistema ERP.
+            """
+            mensaje.attach(MIMEText(cuerpo, 'plain'))
+
+            # 2. Vamos al buzón de Google y la mandamos
+            server = smtplib.SMTP('smtp.gmail.com', 587)
+            server.starttls() # Encriptamos la conexión
+            server.login(remitente, password)
+            text = mensaje.as_string()
+            server.sendmail(remitente, destinatario, text)
+            server.quit()
+            
+            print("Correo enviado al admin exitosamente (Background).")
+            
+        except Exception as e:
+            # Si falla (no hay internet o la contraseña está mal), choca aquí en silencio
+            # sin destruir el programa principal de la recepcionista.
+            print(f"Error silencioso al enviar correo: {e}")
+
 
     def ejecutar_guardado_bd(self, metodo_pago, monto_recibido, monto_plan, monto_locker):
         conn = sqlite3.connect('gimnasio.db')
@@ -551,61 +656,64 @@ class MiembrosFrame(ctk.CTkFrame):
                 venc_bd = datetime.strptime(res_actual[1], "%Y-%m-%d").date()
                 foto_bd = res_actual[2]
                 
-                if plan == plan_bd:
+                # --- NUEVA LÓGICA DE VENCIMIENTO ---
+                if metodo_pago == "Actualización":
+                    # Si solo es edición de datos, mantenemos la fecha actual del socio
                     vencimiento = venc_bd
+                else:
+                    # Es un cobro/renovación. Obtenemos la duración del plan
+                    cursor.execute("SELECT dias_duracion FROM planes_config WHERE nombre=?", (plan,))
+                    dias = cursor.fetchone()[0]
+                    
+                    # Si el socio ya está vencido, empezamos a contar desde HOY
+                    # Si aún está vigente, sumamos los días a su fecha de vencimiento actual (acumulativo)
+                    if venc_bd < hoy or plan != plan_bd:
+                        vencimiento = hoy + timedelta(days=dias)
+                    else:
+                        vencimiento = venc_bd + timedelta(days=dias)
                 
                 foto_final = self.ruta_foto_actual if self.ruta_foto_actual != "" else foto_bd
         else:
             foto_final = self.ruta_foto_actual
 
+        # Si es un socio nuevo (no tiene id_actual)
         if vencimiento is None:
             cursor.execute("SELECT dias_duracion FROM planes_config WHERE nombre=?", (plan,))
             res_plan = cursor.fetchone()
-            if res_plan:
-                dias = res_plan[0]
-                vencimiento = hoy if dias <= 1 else hoy + timedelta(days=dias)
-            else:
-                vencimiento = hoy 
-        
+            dias = res_plan[0] if res_plan else 30
+            vencimiento = hoy if dias <= 1 else hoy + timedelta(days=dias)
         detalles_enf = self.txt_detalles.get("1.0", "end-1c")
         usa_locker = self.var_locker.get()
+        anio_a_guardar = datetime.now().year if self.monto_mantenimiento_actual > 0 else self.var_anio_mantenimiento.get()
 
         try:
             if id_actual:
                 cursor.execute('''UPDATE miembros SET 
-                                nombre=?, apellidos=?, telefono=?, telefono_emergencia=?, email=?, 
-                                enfermedad=?, detalles_enfermedad=?, tipo_plan=?, usa_locker=?, fecha_vencimiento=?, estatus=?,
-                                ruta_foto=? 
-                                WHERE id=?''', 
-                               (self.var_nombre.get(), self.var_apellidos.get(), self.var_telefono.get(), 
-                                self.var_emergencia.get(), self.var_email.get(), self.var_enfermedad.get(), 
-                                detalles_enf, plan, usa_locker, vencimiento.strftime("%Y-%m-%d"), self.var_estatus.get(), 
-                                foto_final, id_actual))
+                            nombre=?, apellidos=?, telefono=?, telefono_emergencia=?, email=?, 
+                            enfermedad=?, detalles_enfermedad=?, tipo_plan=?, usa_locker=?, fecha_vencimiento=?, estatus=?,
+                            ruta_foto=?, anio_mantenimiento=?
+                            WHERE id=?''', 
+                            (self.var_nombre.get(), self.var_apellidos.get(), self.var_telefono.get(), 
+                            self.var_emergencia.get(), self.var_email.get(), self.var_enfermedad.get(), 
+                            detalles_enf, plan, usa_locker, vencimiento.strftime("%Y-%m-%d"), self.var_estatus.get(), 
+                            foto_final, anio_a_guardar, id_actual))
                 id_para_pago = id_actual
             else:
                 cursor.execute('''INSERT INTO miembros 
-                                (nombre, apellidos, telefono, telefono_emergencia, email, enfermedad, detalles_enfermedad, tipo_plan, usa_locker, fecha_registro, fecha_vencimiento, estatus, ruta_foto)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                               (self.var_nombre.get(), self.var_apellidos.get(), self.var_telefono.get(), 
-                                self.var_emergencia.get(), self.var_email.get(), self.var_enfermedad.get(), 
-                                detalles_enf, plan, usa_locker, hoy.strftime("%Y-%m-%d"), vencimiento.strftime("%Y-%m-%d"), "Activo",
-                                foto_final))
+                            (nombre, apellidos, telefono, telefono_emergencia, email, enfermedad, detalles_enfermedad, tipo_plan, usa_locker, fecha_registro, fecha_vencimiento, estatus, ruta_foto, anio_mantenimiento)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                            (self.var_nombre.get(), self.var_apellidos.get(), self.var_telefono.get(), 
+                            self.var_emergencia.get(), self.var_email.get(), self.var_enfermedad.get(), 
+                            detalles_enf, plan, usa_locker, hoy.strftime("%Y-%m-%d"), vencimiento.strftime("%Y-%m-%d"), "Activo",
+                            foto_final, anio_a_guardar))
                 id_para_pago = cursor.lastrowid
             
             # --- TICKETS, PAGOS Y NOTIFICACIONES INTELIGENTES ---
-            if total_pagado > 0:
-                fecha_hora_exacta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                cursor.execute('''INSERT INTO pagos (miembro_id, concepto, monto, metodo_pago, fecha_hora) 
-                                  VALUES (?, ?, ?, ?, ?)''',
-                               (id_para_pago, concepto_venta, total_pagado, metodo_pago, fecha_hora_exacta))
-            
-            conn.commit()
-            
             # Si NO es solo una actualización de datos (es decir, hubo dinero o fue cortesía)
             if metodo_pago != "Actualización":
                 fecha_hora_exacta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
-                # Registramos en la 'bóveda' de pagos, aunque el monto sea 0.0
+                # Registramos en la 'bóveda' de pagos, incluyendo las cortesías de $0.0
                 cursor.execute('''INSERT INTO pagos (miembro_id, concepto, monto, metodo_pago, fecha_hora) 
                                   VALUES (?, ?, ?, ?, ?)''',
                                (id_para_pago, concepto_venta, total_pagado, metodo_pago, fecha_hora_exacta))
@@ -613,7 +721,10 @@ class MiembrosFrame(ctk.CTkFrame):
                 # Generamos el ticket físico
                 nombre_cliente = f"{self.var_nombre.get()} {self.var_apellidos.get()}"
                 self.generar_ticket(nombre_cliente, plan, monto_plan, monto_locker, metodo_pago, vencimiento.strftime("%d/%m/%Y"), concepto_venta)
-                
+                # --- NUEVO: DISPARAMOS EL CORREO EN SEGUNDO PLANO ---
+                hilo_correo = threading.Thread(target=self.enviar_correo_background, args=(concepto_venta, total_pagado, nombre_cliente, plan))
+                hilo_correo.start()
+
                 messagebox.showinfo("Éxito", f"Operación registrada: {concepto_venta}\nTicket generado.")
             else:
                 # Si solo entró aquí para cambiar la foto o el teléfono, no genera registro en pagos
@@ -621,7 +732,6 @@ class MiembrosFrame(ctk.CTkFrame):
             
             conn.commit()
             self.mostrar_lista()
-            
         except Exception as e:
             self.lbl_error_bd.configure(text="Error al guardar en base de datos.")
             print(f"Error técnico: {e}")
@@ -646,6 +756,8 @@ Socio: {nombre_cliente}
 Plan: {plan}
 Subtotal Membresia: ${monto_plan:,.2f}
 """
+        if self.monto_mantenimiento_actual > 0:
+            ticket += f"Mantenimiento Anual: ${self.monto_mantenimiento_actual:,.2f}\n"
         if monto_locker > 0:
             ticket += f"Subtotal Locker:    ${monto_locker:,.2f}\n"
 
@@ -731,16 +843,20 @@ medico antes de entrenar.
         cursor.execute("SELECT * FROM miembros WHERE id=?", (id_socio,))
         fila = cursor.fetchone()
         
-        # --- NUEVO: BÚSQUEDA BLINDADA DE LA FOTO ---
-        # Al pedirla por su nombre exacto, ya no importa si se movió de la celda 13 a la 15
+        # --- BÚSQUEDA BLINDADA DE FOTO Y MANTENIMIENTO ---
         try:
-            cursor.execute("SELECT ruta_foto FROM miembros WHERE id=?", (id_socio,))
-            res_foto = cursor.fetchone()
-            ruta_foto_db = res_foto[0] if res_foto and res_foto[0] else ""
+            cursor.execute("SELECT ruta_foto, anio_mantenimiento FROM miembros WHERE id=?", (id_socio,))
+            res_extra = cursor.fetchone()
+            ruta_foto_db = res_extra[0] if res_extra and res_extra[0] else ""
+            anio_mant_db = int(res_extra[1]) if res_extra and len(res_extra) > 1 and res_extra[1] else 0
         except sqlite3.OperationalError:
-            ruta_foto_db = "" # Por si la columna llegara a fallar
+            ruta_foto_db = ""
+            anio_mant_db = 0
             
         conn.close()
+        
+        # 1. AQUI ESTÁ LA MAGIA: Guardamos el año antes de evaluar los planes
+        self.var_anio_mantenimiento.set(anio_mant_db)
 
         if fila:
             # Llenamos los campos de texto
@@ -763,6 +879,7 @@ medico antes de entrenar.
             vencimiento_date = datetime.strptime(vencimiento_str, "%Y-%m-%d").date()
             hoy = datetime.now().date()
             
+            # 2. SE ACTUALIZA EL COSTO: Como ya se cargó el año arriba, esto ya saldrá en $0.00
             if plan_guardado == "Primera Visita" and vencimiento_date <= hoy:
                 self.var_plan.set("Seleccionar...")
                 self.actualizar_costo_plan("Seleccionar...")
@@ -813,7 +930,7 @@ medico antes de entrenar.
     # ==========================================
     def iniciar_camara(self):
         # 1. Agregamos cv2.CAP_DSHOW para saltarnos el motor lento de Windows
-        self.captura = cv2.VideoCapture(1, cv2.CAP_DSHOW)
+        self.captura = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         
         if self.captura.isOpened():
             # 2. Forzamos una resolución baja (VGA) al arrancar. 

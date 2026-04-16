@@ -1,19 +1,19 @@
 
 ================================
-          GOCHI'S GYM           
+          SportLife GYM           
 ================================
-Fecha: 30/03/2026 20:42:27
-Socio: Ana Valeria Gomez Morales
+Fecha: 14/04/2026 13:03:00
+Socio: Ana Gomez
 
->> MOVIMIENTO: CORTESÍA (VISITA GRATIS) <<
+>> MOVIMIENTO: RENOVACIÓN DE MEMBRESÍA <<
 
 --- DESGLOSE DE COMPRA ---
-Plan: Primera Visita
-Subtotal Membresia: $0.00
+Plan: Semana
+Subtotal Membresia: $150.00
 --------------------------------
-TOTAL A PAGAR:      $0.00
-Metodo de Pago:     Cortesía
-Vencimiento Plan:   30/03/2026
+TOTAL A PAGAR:      $150.00
+Metodo de Pago:     Efectivo
+Vencimiento Plan:   21/04/2026
 --------------------------------
 
 ALERTA Y EXENCION DE RESPONSABILIDAD:

@@ -1,0 +1,29 @@
+
+================================
+          SportLife GYM           
+================================
+Fecha: 04/04/2026 12:12:21
+Socio: qa qa
+
+>> MOVIMIENTO: NUEVA MEMBRESÍA <<
+
+--- DESGLOSE DE COMPRA ---
+Plan: Semana
+Subtotal Membresia: $150.00
+--------------------------------
+TOTAL A PAGAR:      $150.00
+Metodo de Pago:     Tarjeta
+Vencimiento Plan:   11/04/2026
+--------------------------------
+
+ALERTA Y EXENCION DE RESPONSABILIDAD:
+El uso de las instalaciones es bajo su 
+propio riesgo. El gimnasio no se hace 
+responsable por lesiones, problemas de 
+salud o incidentes derivados del uso de 
+suplementos, bebidas energeticas o 
+sobreesfuerzo fisico. Consulte a su 
+medico antes de entrenar.
+
+¡GRACIAS POR TU PREFERENCIA!
+================================

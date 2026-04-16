@@ -2,16 +2,18 @@
 ================================
           SportLife GYM           
 ================================
-Fecha: 30/03/2026 13:59:32
-Socio: Chata Gomez
+Fecha: 04/04/2026 12:21:28
+Socio: Ana Gomez
+
+>> MOVIMIENTO: NUEVA MEMBRESÍA <<
 
 --- DESGLOSE DE COMPRA ---
-Plan: Semana
-Subtotal Membresia: $150.00
+Plan: Visita
+Subtotal Membresia: $50.00
 --------------------------------
-TOTAL A PAGAR:      $150.00
-Metodo de Pago:     Tarjeta
-Vencimiento Plan:   06/04/2026
+TOTAL A PAGAR:      $50.00
+Metodo de Pago:     Efectivo
+Vencimiento Plan:   04/04/2026
 --------------------------------
 
 ALERTA Y EXENCION DE RESPONSABILIDAD:

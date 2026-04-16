@@ -102,5 +102,18 @@ def setup_db():
             costo_venta REAL NOT NULL DEFAULT 0.0
         )
     ''')
+
+    # --- ACTUALIZACIONES PARA EL MANTENIMIENTO ANUAL ---
+    try:
+        cursor.execute("ALTER TABLE miembros ADD COLUMN anio_mantenimiento INTEGER DEFAULT 0")
+        print("Columna 'anio_mantenimiento' agregada a miembros.")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute("ALTER TABLE configuracion ADD COLUMN costo_mantenimiento REAL DEFAULT 600.0")
+        print("Columna 'costo_mantenimiento' agregada a configuracion.")
+    except sqlite3.OperationalError:
+        pass
     conn.commit() 
     conn.close()

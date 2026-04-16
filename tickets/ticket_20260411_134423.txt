@@ -1,19 +1,19 @@
 
 ================================
-          GOCHI'S GYM           
+          SportLife GYM           
 ================================
-Fecha: 30/03/2026 14:11:08
-Socio: Chata Gomez
+Fecha: 11/04/2026 13:44:23
+Socio: Juliana Belcast
 
->> MOVIMIENTO: RENOVACIÓN DE MEMBRESÍA <<
+>> MOVIMIENTO: CORTESÍA (VISITA GRATIS) <<
 
 --- DESGLOSE DE COMPRA ---
-Plan: Semana
-Subtotal Membresia: $150.00
+Plan: Primera Visita
+Subtotal Membresia: $0.00
 --------------------------------
-TOTAL A PAGAR:      $150.00
-Metodo de Pago:     Tarjeta
-Vencimiento Plan:   29/03/2026
+TOTAL A PAGAR:      $0.00
+Metodo de Pago:     Cortesía
+Vencimiento Plan:   11/04/2026
 --------------------------------
 
 ALERTA Y EXENCION DE RESPONSABILIDAD:

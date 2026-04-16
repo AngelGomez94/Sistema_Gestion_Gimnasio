@@ -1,0 +1,29 @@
+
+================================
+          SportLife GYM           
+================================
+Fecha: 11/04/2026 10:03:22
+Socio: Socio Prueba Vencimiento
+
+>> MOVIMIENTO: RENOVACIÓN DE MEMBRESÍA <<
+
+--- DESGLOSE DE COMPRA ---
+Plan: Mensualidad
+Subtotal Membresia: $400.00
+--------------------------------
+TOTAL A PAGAR:      $400.00
+Metodo de Pago:     Efectivo
+Vencimiento Plan:   12/05/2026
+--------------------------------
+
+ALERTA Y EXENCION DE RESPONSABILIDAD:
+El uso de las instalaciones es bajo su 
+propio riesgo. El gimnasio no se hace 
+responsable por lesiones, problemas de 
+salud o incidentes derivados del uso de 
+suplementos, bebidas energeticas o 
+sobreesfuerzo fisico. Consulte a su 
+medico antes de entrenar.
+
+¡GRACIAS POR TU PREFERENCIA!
+================================
