@@ -10,7 +10,7 @@ class LoginApp(ctk.CTk):
         ctk.set_appearance_mode("System")  
         ctk.set_default_color_theme("blue") 
         
-        self.title("Sistema de Gestión de Gimnasio - Login")
+        self.title("Sistema de TeamSportLife de Gimnasio - Login")
         
         ancho, alto = 400, 350
         x = (self.winfo_screenwidth() // 2) - (ancho // 2)
