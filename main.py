@@ -8,4 +8,5 @@ if __name__ == "__main__":
     # 2. Instanciamos la clase del Login y arrancamos el programa
     app = LoginApp() 
     app.mainloop()
+    #Nuevo comentario
     
