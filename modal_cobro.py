@@ -1,52 +1,38 @@
 import customtkinter as ctk
 
 class ModalCobro(ctk.CTkToplevel):
-    def __init__(self, parent, monto_plan, monto_locker, callback_exito):
+    def __init__(self, parent, monto_plan, monto_locker, monto_inscripcion, callback_exito):
         # Nota: 'parent' aquí debe ser la ventana principal (MainWindow)
         super().__init__(parent)
         
         self.monto_plan = float(monto_plan)
         self.monto_locker = float(monto_locker)
-        self.monto_total = self.monto_plan + self.monto_locker
+        self.monto_inscripcion = float(monto_inscripcion)
+        
+        # El total ahora incluye la inscripción
+        self.monto_total = self.monto_plan + self.monto_locker + self.monto_inscripcion
         self.callback_exito = callback_exito
         
         self.title("Punto de Cobro")
         
-        # --- NUEVA LÓGICA DE CENTRADO DINÁMICO ---
+        # --- LÓGICA DE CENTRADO DINÁMICO ---
         anchura_modal = 400
         altura_modal = 500
-        
-        # 1. Forzamos a que la ventana principal actualice sus datos de geometría
-        # por si el usuario acaba de maximizar o cambiar el tamaño justo antes.
         self.master.update_idletasks()
-        
-        # 2. Obtenemos las medidas y posición actuales de la ventana principal (MainWindow)
-        # Usamos winfo_toplevel() para asegurarnos de medir la ventana, no un frame interno.
         ventana_principal = self.master.winfo_toplevel()
         anchura_padre = ventana_principal.winfo_width()
         altura_padre = ventana_principal.winfo_height()
         pos_x_padre = ventana_principal.winfo_rootx()
         pos_y_padre = ventana_principal.winfo_rooty()
         
-        # 3. Hacemos la matemática para calcular el centro
-        # Formula: Posicion Padre + (Mitad Padre - Mitad Hijo)
         coordenada_x = pos_x_padre + (anchura_padre // 2) - (anchura_modal // 2)
-        # Un pequeño ajuste de -20 en Y para que visualmente se vea más centrado (por la barra de título)
         coordenada_y = pos_y_padre + (altura_padre // 2) - (altura_modal // 2) - 20
-        
-        # 4. Establecemos la geometría final ANTES de que la ventana sea visible para evitar parpadeos
-        # Formato: "ANCHO x ALTO + X + Y"
         self.geometry(f"{anchura_modal}x{altura_modal}+{coordenada_x}+{coordenada_y}")
-        # ------------------------------------------
-        
         self.resizable(False, False)
         
-        # Secuestramos la atención del usuario
         self.transient(parent)
         self.grab_set() 
         self.focus_force()
-        
-        # Bloqueamos el botón 'X' de la ventana para forzar el uso de Cancelar
         self.protocol("WM_DELETE_WINDOW", self.cancelar)
         
         self.var_metodo = ctk.StringVar(value="Efectivo")
@@ -56,7 +42,12 @@ class ModalCobro(ctk.CTkToplevel):
         # --- UI DESGLOSE ---
         ctk.CTkLabel(self, text="Resumen de Cobro", font=("Arial", 20, "bold")).pack(pady=(20, 10))
         
-        ctk.CTkLabel(self, text=f"Membresía: ${self.monto_plan:,.2f}", font=("Arial", 14)).pack()
+        ctk.CTkLabel(self, text=f"Membresía/Mant: ${self.monto_plan:,.2f}", font=("Arial", 14)).pack()
+        
+        # NUEVO: DIBUJAMOS EL RENGLÓN DE INSCRIPCIÓN SI EXISTE
+        if self.monto_inscripcion > 0:
+            ctk.CTkLabel(self, text=f"Inscripción: ${self.monto_inscripcion:,.2f}", font=("Arial", 14)).pack()
+            
         if self.monto_locker > 0:
             ctk.CTkLabel(self, text=f"Renta de Locker: ${self.monto_locker:,.2f}", font=("Arial", 14)).pack()
             
@@ -70,15 +61,12 @@ class ModalCobro(ctk.CTkToplevel):
         self.frame_dinamico = ctk.CTkFrame(self, fg_color="transparent")
         self.frame_dinamico.pack(fill="x", padx=40, pady=10)
         
-        # Elementos para Efectivo
         self.lbl_recibido = ctk.CTkLabel(self.frame_dinamico, text="Monto Recibido ($):")
         self.entry_recibido = ctk.CTkEntry(self.frame_dinamico, textvariable=self.var_recibido, justify="center", font=("Arial", 16))
         self.lbl_cambio = ctk.CTkLabel(self.frame_dinamico, text="Cambio: $0.00", font=("Arial", 18, "bold"), text_color="#f1c40f")
         
-        # Elementos para Tarjeta
         self.lbl_aviso = ctk.CTkLabel(self.frame_dinamico, text="⚠️ Pase la tarjeta por la terminal.\nSolo continúe si el cobro fue EXITOSO.", text_color="#e74c3c", font=("Arial", 14, "bold"))
         
-        # --- BOTONES ---
         frame_botones = ctk.CTkFrame(self, fg_color="transparent")
         frame_botones.pack(pady=20)
         

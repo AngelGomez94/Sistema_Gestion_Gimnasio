@@ -1,0 +1,29 @@
+
+================================
+          SportLife GYM           
+================================
+Fecha: 22/04/2026 23:41:50
+Socio: qa qa
+
+>> MOVIMIENTO: CORTESÍA (VISITA GRATIS) <<
+
+--- DESGLOSE DE COMPRA ---
+Plan: Primera Visita
+Subtotal Membresia: $0.00
+--------------------------------
+TOTAL A PAGAR:      $0.00
+Metodo de Pago:     Cortesía
+Vencimiento Plan:   22/04/2026
+--------------------------------
+
+ALERTA Y EXENCION DE RESPONSABILIDAD:
+El uso de las instalaciones es bajo su 
+propio riesgo. El gimnasio no se hace 
+responsable por lesiones, problemas de 
+salud o incidentes derivados del uso de 
+suplementos, bebidas energeticas o 
+sobreesfuerzo fisico. Consulte a su 
+medico antes de entrenar.
+
+¡GRACIAS POR TU PREFERENCIA!
+================================

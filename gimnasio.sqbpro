@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?><sqlb_project><db path="gimnasio.db" readonly="0" foreign_keys="1" case_sensitive_like="0" temp_store="0" wal_autocheckpoint="1000" synchronous="2"/><attached/><window><main_tabs open="structure browser pragmas query" current="3"/></window><tab_structure><column_width id="0" width="300"/><column_width id="1" width="0"/><column_width id="2" width="100"/><column_width id="3" width="3058"/><column_width id="4" width="0"/><expanded_item id="0" parent="1"/><expanded_item id="1" parent="1"/><expanded_item id="2" parent="1"/><expanded_item id="3" parent="1"/></tab_structure><tab_browse><table title="configuracion" custom_title="0" dock_id="5" table="4,13:mainconfiguracion"/><dock_state state="000000ff00000000fd00000001000000020000043b000002aefc0100000005fb000000160064006f0063006b00420072006f00770073006500310100000000ffffffff0000000000000000fb000000160064006f0063006b00420072006f00770073006500320100000000000005f40000000000000000fb000000160064006f0063006b00420072006f00770073006500330100000000ffffffff0000000000000000fb000000160064006f0063006b00420072006f007700730065003401000000000000043b0000000000000000fb000000160064006f0063006b00420072006f00770073006500350100000000ffffffff0000011800ffffff000002580000000000000004000000040000000800000008fc00000000"/><default_encoding codec=""/><browse_table_settings/></tab_browse><tab_sql><sql name="SQL 1*">select * from miembros
+select * from configuracion
+
+update configuracion
+set costo_mantenimiento = '1'
+where id = '1'
+
+select u.nombre, u.apellidos, o.concepto , o.monto
+from miembros u
+inner join pagos o
+on u.id = o.miembro_id
+
+update miembros 
+set estatus = 'Activo',
+    fecha_registro = '2026-01-18',
+    fecha_vencimiento = '2026-04-18'
+where nombre = 'Valeria' and apellidos = 'Gomez'
+
+
+
+
+delete from miembros where nombre = 'Andres' and apellidos = 'Mejia'
+
+update pagos
+set 
+    fecha_hora = '2026-03-04 12:03:44'
+where id = '3'
+
+INSERT INTO miembros (
+    nombre, 
+    apellidos, 
+    telefono, 
+    telefono_emergencia, 
+    email, 
+    enfermedad, 
+    detalles_enfermedad, 
+    tipo_plan, 
+    usa_locker, 
+    fecha_registro, 
+    fecha_vencimiento, 
+    estatus, 
+    ruta_foto, 
+    anio_mantenimiento
+) 
+VALUES (
+    'Socio', 
+    'Prueba Vencimiento', 
+    '5566770000', 
+    '5557654321', 
+    'prueba@gimnasio.com', 
+    'No', 
+    '', 
+    'Mensualidad', 
+    'No', 
+    '2026-03-07', 
+    '2026-04-07', 
+    'Activo', 
+    '', 
+    0
+);
+
+
+
+</sql><current_tab id="0"/></tab_sql></sqlb_project>

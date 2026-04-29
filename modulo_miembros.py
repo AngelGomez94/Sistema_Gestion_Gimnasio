@@ -11,8 +11,9 @@ import threading
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-
-
+import threading
+import winsound
+import uareu4500
 
 class MiembrosFrame(ctk.CTkFrame):
     def __init__(self, parent):
@@ -32,6 +33,8 @@ class MiembrosFrame(ctk.CTkFrame):
         self.var_busqueda = ctk.StringVar()
         self.var_anio_mantenimiento = ctk.IntVar(value=0) # Para saber qué año pagó por última vez
         self.monto_mantenimiento_actual = 0.0 # Para guardar el cálculo del prorrateo y pasarlo al ticket
+        self.huella_temporal = None
+        
 
         for var in [self.var_nombre, self.var_apellidos, self.var_telefono, self.var_emergencia, self.var_email, self.var_enfermedad, self.var_plan, self.var_estatus]:
             var.trace_add("write", self.validar_formulario)
@@ -269,15 +272,35 @@ class MiembrosFrame(ctk.CTkFrame):
         self.lbl_estado_foto = ctk.CTkLabel(frame_foto, text="", font=("Arial", 12, "bold"))
         self.lbl_estado_foto.pack(pady=(0, 5))
 
-        self.btn_encender_cam = ctk.CTkButton(frame_foto, text="📷 Encender Cámara", command=self.iniciar_camara, width=180)
+        self.btn_encender_cam = ctk.CTkButton(frame_foto, text=" Encender Cámara", command=self.iniciar_camara, width=180)
         self.btn_encender_cam.pack(pady=5)
 
-        self.btn_tomar_foto = ctk.CTkButton(frame_foto, text="📸 Capturar Foto", command=self.tomar_foto, state="disabled", fg_color="#d35400", hover_color="#e67e22", width=180)
+        self.btn_tomar_foto = ctk.CTkButton(frame_foto, text=" Capturar Foto", command=self.tomar_foto, state="disabled", fg_color="#d35400", hover_color="#e67e22", width=180)
         self.btn_tomar_foto.pack(pady=5)
+        self.btn_huella = ctk.CTkButton(
+            frame_foto,
+            text="👆 Iniciar Lector", 
+            command=self.iniciar_captura_huella, 
+            fg_color="#3498db", 
+            hover_color="#2980b9",
+            width=180,
+            font=("Arial", 14, "bold")
+        )
+        self.btn_huella.pack(pady=(15, 5))
+        
+        # --- NUEVA ETIQUETA INTELIGENTE ---
+        self.lbl_estado_huella = ctk.CTkLabel(
+            frame_foto, 
+            text="Huella: Sin registrar", 
+            font=("Arial", 12, "bold"),
+            text_color="gray"
+        )
+        self.lbl_estado_huella.pack(pady=(0, 5))
         
         # Variable para guardar la ruta en la base de datos después
         self.ruta_foto_actual = ""
         self.captura = None 
+
         # ----------------------------------------
 
         frame_acciones = ctk.CTkFrame(contenedor_central, fg_color="transparent")
@@ -291,6 +314,8 @@ class MiembrosFrame(ctk.CTkFrame):
         
         self.lbl_error_bd = ctk.CTkLabel(contenedor_central, text="", text_color="red", font=("Arial", 12, "bold"))
         self.lbl_error_bd.pack()
+        
+        
 
     # ==========================================
     # LÓGICA DE NEGOCIO 
@@ -306,6 +331,7 @@ class MiembrosFrame(ctk.CTkFrame):
         if valor_seleccionado == "Seleccionar...":
             self.lbl_costo_plan.configure(text="")
             self.monto_mantenimiento_actual = 0.0
+            self.monto_inscripcion_actual = 0.0
             return
 
         # 2. CONSULTAR COSTOS EN BD (BLINDADO)
@@ -316,13 +342,25 @@ class MiembrosFrame(ctk.CTkFrame):
             res_plan = cursor.fetchone()
 
             try:
-                cursor.execute("SELECT costo_locker, costo_mantenimiento FROM configuracion LIMIT 1")
+                # --- NUEVO: TRAEMOS EL COSTO DE INSCRIPCIÓN ---
+                cursor.execute("SELECT costo_locker, costo_mantenimiento, costo_inscripcion FROM configuracion LIMIT 1")
                 res_config = cursor.fetchone()
                 costo_mantenimiento_db = res_config[1] if res_config and len(res_config) > 1 else 0.0
+                costo_inscripcion_db = res_config[2] if res_config and len(res_config) > 2 else 50.0
             except sqlite3.OperationalError:
                 cursor.execute("SELECT costo_locker FROM configuracion LIMIT 1")
                 res_config = cursor.fetchone()
                 costo_mantenimiento_db = 0.0
+                costo_inscripcion_db = 50.0
+
+            # --- NUEVO: REVISAMOS SI YA PAGÓ INSCRIPCIÓN ---
+            id_actual = self.var_id.get()
+            inscripcion_pagada = "No"
+            if id_actual:
+                cursor.execute("SELECT inscripcion_pagada FROM miembros WHERE id=?", (id_actual,))
+                res_ins = cursor.fetchone()
+                if res_ins:
+                    inscripcion_pagada = res_ins[0]
 
             conn.close()
         except Exception as e:
@@ -333,11 +371,15 @@ class MiembrosFrame(ctk.CTkFrame):
         costo_locker_db = res_config[0] if res_config else 0.0
         costo_locker = costo_locker_db if self.var_locker.get() == "Si" else 0.0
         self.monto_mantenimiento_actual = 0.0
+        
+        # --- NUEVO: LÓGICA DE INSCRIPCIÓN ---
+        self.monto_inscripcion_actual = 0.0
+        if valor_seleccionado in ["Mensualidad", "Anualidad"] and inscripcion_pagada == "No":
+            self.monto_inscripcion_actual = costo_inscripcion_db
 
         # --- 3. LÓGICA DE MANTENIMIENTO ANUAL (REGLA DEL DÍA 1) ---
         hoy = datetime.now()
         
-        # Validamos el "sello" del año. Si la variable falla o no existe, asumimos que no ha pagado (False).
         try:
             mantenimiento_pagado = self.var_anio_mantenimiento.get() >= hoy.year
         except AttributeError:
@@ -345,27 +387,25 @@ class MiembrosFrame(ctk.CTkFrame):
 
         if not mantenimiento_pagado:
             if valor_seleccionado == "Anualidad":
-                # Regla: Anualidad paga el 100% SIEMPRE
                 self.monto_mantenimiento_actual = costo_mantenimiento_db
-                
             elif valor_seleccionado == "Mensualidad":
-                # Regla: Mensualidad paga el prorrateo del mes actual hasta Diciembre
                 meses_restantes = 12 - hoy.month + 1
                 self.monto_mantenimiento_actual = (costo_mantenimiento_db / 12) * meses_restantes
             else:
-                # Visitas, Cortesías o planes casuales se salvan
                 self.monto_mantenimiento_actual = 0.0
         else:
-            # Si ya pagó el año actual, lo dejamos en paz
             self.monto_mantenimiento_actual = 0.0
 
         # --- 4. CALCULAR TOTAL Y MOSTRAR DESGLOSE ---
-        costo_total = costo_base + costo_locker + self.monto_mantenimiento_actual
+        costo_total = costo_base + costo_locker + self.monto_mantenimiento_actual + self.monto_inscripcion_actual
 
         if costo_base == 0:
             self.lbl_costo_plan.configure(text="¡Cortesía! Costo: $0.00 MXN", text_color="#2ecc71")
         else:
             texto_desglose = f"Plan: ${costo_base:.2f}"
+            # Se dibuja la inscripción si aplica
+            if self.monto_inscripcion_actual > 0:
+                texto_desglose += f" | Inscr: ${self.monto_inscripcion_actual:.2f}"
             if costo_locker > 0:
                 texto_desglose += f" | Locker: ${costo_locker:.2f}"
             if self.monto_mantenimiento_actual > 0:
@@ -401,7 +441,7 @@ class MiembrosFrame(ctk.CTkFrame):
         # Regresamos el recuadro a su estado original (gris y sin foto)
         self.lbl_video.configure(image="", text="Cámara Apagada", require_redraw=True)
         self.lbl_estado_foto.configure(text="")
-        self.btn_encender_cam.configure(state="normal", text="📷 Encender Cámara")
+        self.btn_encender_cam.configure(state="normal", text=" Encender Cámara")
         self.btn_tomar_foto.configure(state="disabled")
         # --------------------------------------------------------
         
@@ -540,18 +580,21 @@ class MiembrosFrame(ctk.CTkFrame):
             if res_locker:
                 monto_locker = res_locker[0]
 
-        # --- LÓGICA DE UMBRALES DE RENOVACIÓN ---
+        # --- LÓGICA DE UMBRALES DE RENOVACIÓN E INSCRIPCIÓN ---
         es_renovacion = True
+        inscripcion_pagada = "No" # Asumimos "No" por defecto para nuevos
+        
         if id_actual:
-            cursor.execute("SELECT tipo_plan, fecha_vencimiento, usa_locker FROM miembros WHERE id=?", (id_actual,))
+            # Traemos la columna inscripcion_pagada también
+            cursor.execute("SELECT tipo_plan, fecha_vencimiento, usa_locker, inscripcion_pagada FROM miembros WHERE id=?", (id_actual,))
             res_actual = cursor.fetchone()
             if res_actual:
                 plan_bd = res_actual[0]
                 venc_bd = datetime.strptime(res_actual[1], "%Y-%m-%d").date()
                 locker_bd = res_actual[2]
+                inscripcion_pagada = res_actual[3] if res_actual[3] else "No"
                 hoy = datetime.now().date()
                 
-                # Definimos los días de anticipación permitidos para renovar
                 umbrales = {
                     "Mensualidad": 5,
                     "Anualidad": 15,
@@ -562,27 +605,34 @@ class MiembrosFrame(ctk.CTkFrame):
                 umbral = umbrales.get(plan, 0)
                 dias_restantes = (venc_bd - hoy).days
                 
-                # REGLA: Si es el mismo plan y faltan MÁS días que el umbral, no cobramos (es solo edición)
                 if plan == plan_bd and dias_restantes > umbral:
                     monto_plan = 0.0
                 
-                # Regla del Locker: Si ya lo tenía y no ha cambiado el estatus, no cobramos
                 if self.var_locker.get() == "Si" and locker_bd == "Si":
-                    # Solo cobramos el locker si el plan también se está renovando
                     if monto_plan == 0.0:
                         monto_locker = 0.0
                 
                 if monto_plan == 0.0 and monto_locker == 0.0:
                     es_renovacion = False
 
+        # --- CÁLCULO FINAL DE INSCRIPCIÓN ---
+        monto_inscripcion = 0.0
+        if plan in ["Mensualidad", "Anualidad"] and inscripcion_pagada == "No":
+            cursor.execute("SELECT costo_inscripcion FROM configuracion LIMIT 1")
+            res_ins = cursor.fetchone()
+            monto_inscripcion = res_ins[0] if res_ins else 50.0
+
         conn.close()
         
-        # El total de la operación incluye el mantenimiento si es que aplica
-        total_operacion = monto_plan + monto_locker + self.monto_mantenimiento_actual
+        # Guardamos en memoria para usarlo en ejecutar_guardado_bd sin romper callbacks
+        self.monto_inscripcion_a_cobrar = monto_inscripcion
+        
+        total_operacion = monto_plan + monto_locker + self.monto_mantenimiento_actual + monto_inscripcion
 
         if total_operacion > 0:
             total_plan_y_mant = monto_plan + self.monto_mantenimiento_actual
-            ModalCobro(self.winfo_toplevel(), total_plan_y_mant, monto_locker, self.ejecutar_guardado_bd)
+            # NUEVO: Pasamos monto_inscripcion como nuevo argumento al ModalCobro
+            ModalCobro(self.winfo_toplevel(), total_plan_y_mant, monto_locker, monto_inscripcion, self.ejecutar_guardado_bd)
         else:
             motivo = "Actualización" if id_actual and not es_renovacion else "Cortesía"
             self.ejecutar_guardado_bd(motivo, "0", 0.0, 0.0)
@@ -638,7 +688,10 @@ class MiembrosFrame(ctk.CTkFrame):
         plan = self.var_plan.get()
         vencimiento = None
         
-        # --- NUEVO: DEFINIR EL CONCEPTO EXACTO PARA EL TICKET Y CORREO ---
+        monto_inscripcion = getattr(self, 'monto_inscripcion_a_cobrar', 0.0)
+        # --- NUEVO: Rescatamos la huella de la memoria temporal ---
+        huella_a_guardar = getattr(self, 'huella_temporal', None) 
+        
         if metodo_pago == "Cortesía":
             concepto_venta = "Cortesía (Visita Gratis)"
         elif id_actual:
@@ -646,27 +699,29 @@ class MiembrosFrame(ctk.CTkFrame):
         else:
             concepto_venta = "Nueva Membresía"
             
-        total_pagado = monto_plan + monto_locker
+        total_pagado = monto_plan + monto_locker + monto_inscripcion
+        
+        huella_final = huella_a_guardar
         
         if id_actual:
-            cursor.execute("SELECT tipo_plan, fecha_vencimiento, ruta_foto FROM miembros WHERE id=?", (id_actual,))
+            # Traemos la huella_id de la base de datos
+            cursor.execute("SELECT tipo_plan, fecha_vencimiento, ruta_foto, huella_id FROM miembros WHERE id=?", (id_actual,))
             res_actual = cursor.fetchone()
             if res_actual:
                 plan_bd = res_actual[0]
                 venc_bd = datetime.strptime(res_actual[1], "%Y-%m-%d").date()
                 foto_bd = res_actual[2]
+                huella_bd = res_actual[3] if len(res_actual) > 3 else None
                 
-                # --- NUEVA LÓGICA DE VENCIMIENTO ---
+                # REGLA: Si no pusimos dedo nuevo, le respetamos su huella vieja
+                if not huella_a_guardar:
+                    huella_final = huella_bd
+                
                 if metodo_pago == "Actualización":
-                    # Si solo es edición de datos, mantenemos la fecha actual del socio
                     vencimiento = venc_bd
                 else:
-                    # Es un cobro/renovación. Obtenemos la duración del plan
                     cursor.execute("SELECT dias_duracion FROM planes_config WHERE nombre=?", (plan,))
                     dias = cursor.fetchone()[0]
-                    
-                    # Si el socio ya está vencido, empezamos a contar desde HOY
-                    # Si aún está vigente, sumamos los días a su fecha de vencimiento actual (acumulativo)
                     if venc_bd < hoy or plan != plan_bd:
                         vencimiento = hoy + timedelta(days=dias)
                     else:
@@ -676,60 +731,71 @@ class MiembrosFrame(ctk.CTkFrame):
         else:
             foto_final = self.ruta_foto_actual
 
-        # Si es un socio nuevo (no tiene id_actual)
         if vencimiento is None:
             cursor.execute("SELECT dias_duracion FROM planes_config WHERE nombre=?", (plan,))
             res_plan = cursor.fetchone()
             dias = res_plan[0] if res_plan else 30
             vencimiento = hoy if dias <= 1 else hoy + timedelta(days=dias)
+            
         detalles_enf = self.txt_detalles.get("1.0", "end-1c")
         usa_locker = self.var_locker.get()
         anio_a_guardar = datetime.now().year if self.monto_mantenimiento_actual > 0 else self.var_anio_mantenimiento.get()
 
         try:
+            nuevo_estatus_inscripcion = 'Si' if monto_inscripcion > 0 else None
+            
             if id_actual:
+                if nuevo_estatus_inscripcion is None:
+                    cursor.execute("SELECT inscripcion_pagada FROM miembros WHERE id=?", (id_actual,))
+                    res_ins = cursor.fetchone()
+                    nuevo_estatus_inscripcion = res_ins[0] if res_ins else 'No'
+
+                # --- NUEVO: Inyectamos la huella_final en el UPDATE ---
                 cursor.execute('''UPDATE miembros SET 
                             nombre=?, apellidos=?, telefono=?, telefono_emergencia=?, email=?, 
                             enfermedad=?, detalles_enfermedad=?, tipo_plan=?, usa_locker=?, fecha_vencimiento=?, estatus=?,
-                            ruta_foto=?, anio_mantenimiento=?
+                            ruta_foto=?, anio_mantenimiento=?, inscripcion_pagada=?, huella_id=?
                             WHERE id=?''', 
                             (self.var_nombre.get(), self.var_apellidos.get(), self.var_telefono.get(), 
                             self.var_emergencia.get(), self.var_email.get(), self.var_enfermedad.get(), 
                             detalles_enf, plan, usa_locker, vencimiento.strftime("%Y-%m-%d"), self.var_estatus.get(), 
-                            foto_final, anio_a_guardar, id_actual))
+                            foto_final, anio_a_guardar, nuevo_estatus_inscripcion, huella_final, id_actual))
                 id_para_pago = id_actual
             else:
+                if nuevo_estatus_inscripcion is None: nuevo_estatus_inscripcion = 'No'
+                
+                # --- NUEVO: Inyectamos huella_final en el INSERT ---
                 cursor.execute('''INSERT INTO miembros 
-                            (nombre, apellidos, telefono, telefono_emergencia, email, enfermedad, detalles_enfermedad, tipo_plan, usa_locker, fecha_registro, fecha_vencimiento, estatus, ruta_foto, anio_mantenimiento)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                            (nombre, apellidos, telefono, telefono_emergencia, email, enfermedad, detalles_enfermedad, tipo_plan, usa_locker, fecha_registro, fecha_vencimiento, estatus, ruta_foto, anio_mantenimiento, inscripcion_pagada, huella_id)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                             (self.var_nombre.get(), self.var_apellidos.get(), self.var_telefono.get(), 
                             self.var_emergencia.get(), self.var_email.get(), self.var_enfermedad.get(), 
                             detalles_enf, plan, usa_locker, hoy.strftime("%Y-%m-%d"), vencimiento.strftime("%Y-%m-%d"), "Activo",
-                            foto_final, anio_a_guardar))
+                            foto_final, anio_a_guardar, nuevo_estatus_inscripcion, huella_final))
                 id_para_pago = cursor.lastrowid
             
-            # --- TICKETS, PAGOS Y NOTIFICACIONES INTELIGENTES ---
-            # Si NO es solo una actualización de datos (es decir, hubo dinero o fue cortesía)
             if metodo_pago != "Actualización":
                 fecha_hora_exacta = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
-                # Registramos en la 'bóveda' de pagos, incluyendo las cortesías de $0.0
                 cursor.execute('''INSERT INTO pagos (miembro_id, concepto, monto, metodo_pago, fecha_hora) 
                                   VALUES (?, ?, ?, ?, ?)''',
                                (id_para_pago, concepto_venta, total_pagado, metodo_pago, fecha_hora_exacta))
                 
-                # Generamos el ticket físico
                 nombre_cliente = f"{self.var_nombre.get()} {self.var_apellidos.get()}"
                 self.generar_ticket(nombre_cliente, plan, monto_plan, monto_locker, metodo_pago, vencimiento.strftime("%d/%m/%Y"), concepto_venta)
-                # --- NUEVO: DISPARAMOS EL CORREO EN SEGUNDO PLANO ---
+                
                 hilo_correo = threading.Thread(target=self.enviar_correo_background, args=(concepto_venta, total_pagado, nombre_cliente, plan))
                 hilo_correo.start()
 
                 messagebox.showinfo("Éxito", f"Operación registrada: {concepto_venta}\nTicket generado.")
             else:
-                # Si solo entró aquí para cambiar la foto o el teléfono, no genera registro en pagos
                 messagebox.showinfo("Éxito", "Datos del socio actualizados correctamente.")
             
+            # --- LIMPIEZA FINAL: Reseteamos la huella para el siguiente socio ---
+            self.huella_temporal = None
+            if hasattr(self, 'btn_huella'):
+                self.btn_huella.configure(text="Capturar Huella", fg_color="#3498db")
+            self.lbl_estado_huella.configure(text="Huella: Sin registrar", text_color="gray")
             conn.commit()
             self.mostrar_lista()
         except Exception as e:
@@ -737,11 +803,15 @@ class MiembrosFrame(ctk.CTkFrame):
             print(f"Error técnico: {e}")
         finally:
             conn.close()
-
     def generar_ticket(self, nombre_cliente, plan, monto_plan, monto_locker, metodo_pago, fecha_vencimiento, concepto_venta):
         # Esta función crea un archivo .txt con formato de ticket
         fecha_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        total = monto_plan + monto_locker
+        
+        # 1. Recuperamos el monto de inscripción de la memoria
+        monto_inscripcion = getattr(self, 'monto_inscripcion_a_cobrar', 0.0)
+        
+        # 2. BUG FIX: El total del ticket ahora sí suma TODOS los conceptos
+        total = monto_plan + monto_locker + self.monto_mantenimiento_actual + monto_inscripcion
         
         ticket = f"""
 ================================
@@ -756,6 +826,9 @@ Socio: {nombre_cliente}
 Plan: {plan}
 Subtotal Membresia: ${monto_plan:,.2f}
 """
+        # 3. Agregamos los renglones extra dinámicamente solo si se cobraron
+        if monto_inscripcion > 0:
+            ticket += f"Inscripcion:        ${monto_inscripcion:,.2f}\n"
         if self.monto_mantenimiento_actual > 0:
             ticket += f"Mantenimiento Anual: ${self.monto_mantenimiento_actual:,.2f}\n"
         if monto_locker > 0:
@@ -792,42 +865,33 @@ medico antes de entrenar.
             
         print(f"Ticket generado en: {ruta_absoluta}")
         
-        # --- NUEVA LÓGICA DE IMPRESIÓN FÍSICA ---
-        # --- NUEVA LÓGICA DE IMPRESIÓN FÍSICA (MÉTODO RAW) ---
+        # --- LÓGICA DE IMPRESIÓN FÍSICA (MÉTODO RAW) ---
         try:
             impresora_actual = win32print.GetDefaultPrinter()
             print(f"Enviando en formato RAW a: {impresora_actual}")
             
-            # 1. Abrimos la conexión directa con el hardware de la impresora
             hPrinter = win32print.OpenPrinter(impresora_actual)
             try:
-                # 2. Le indicamos al sistema que le mandaremos bytes crudos (RAW), sin formatos de Windows
                 hJob = win32print.StartDocPrinter(hPrinter, 1, ("Ticket Gimnasio", "", "RAW"))
                 win32print.StartPagePrinter(hPrinter)
                 
-                # 3. Agregamos saltos de línea al final del ticket. 
-                # Esto es VITAL para que el papel avance lo suficiente y puedas cortarlo sin rasgar las letras.
                 ticket_final = ticket + "\n\n\n\n\n"
                 
-                # 4. Convertimos el texto a bytes. 
-                # Usamos 'latin-1' (o podrías probar 'cp850') porque es la codificación nativa que 
-                # usan la mayoría de estas impresoras para que los acentos y la "ñ" salgan bien.
+                # Sin acentos raros en la impresora térmica
                 datos_crudos = ticket_final.encode("latin-1", errors="replace")
                 
-                # 5. Disparamos los datos directo a la impresora térmica
                 win32print.WritePrinter(hPrinter, datos_crudos)
                 
-                # 6. Cerramos el trabajo de impresión
                 win32print.EndPagePrinter(hPrinter)
                 win32print.EndDocPrinter(hPrinter)
             finally:
-                # Siempre liberamos la impresora, incluso si hay error
                 win32print.ClosePrinter(hPrinter)
                 
             print("Ticket impreso correctamente en formato térmico.")
             
         except Exception as e:
             print(f"Error al intentar imprimir físicamente: {e}")
+            
     def editar_socio(self, event):
         item_seleccionado = self.tabla.focus()
         if item_seleccionado:
@@ -1017,3 +1081,56 @@ medico antes de entrenar.
             self.captura = None
         self.btn_encender_cam.configure(state="normal")
         self.btn_tomar_foto.configure(state="disabled")
+    
+    def iniciar_captura_huella(self):
+        # Candado lógico: Ignora clics adicionales si ya está leyendo
+        if getattr(self, 'leyendo_huella', False):
+            return
+        self.leyendo_huella = True 
+        
+        # Actualizamos la ETIQUETA, no el botón
+        self.lbl_estado_huella.configure(text="Coloca el dedo...", text_color="#f39c12")
+        self.resultado_huella = None
+        self.huella_terminada = False
+        
+        # Lanzamos el lector en el fondo
+        threading.Thread(target=self._proceso_captura_huella_silencioso, daemon=True).start()
+        self.vigilar_captura()
+
+    def _proceso_captura_huella_silencioso(self):
+        try:
+            self.resultado_huella = uareu4500.getFingerReadingAsBase64String()
+            
+            # Los pitidos suenan en el fondo para no congelar la pantalla
+            if self.resultado_huella:
+                winsound.Beep(2000, 100)
+                winsound.Beep(2000, 100)
+            else:
+                winsound.Beep(500, 500)
+                
+        except Exception as e:
+            print(f"Error técnico con el hardware: {e}")
+            self.resultado_huella = "ERROR"
+            #winsound.Beep(500, 500)
+        finally:
+            self.huella_terminada = True
+
+    def vigilar_captura(self):
+        # Escudo de seguridad por si cierras la ventana
+        if not hasattr(self, 'lbl_estado_huella') or not self.lbl_estado_huella.winfo_exists():
+            return
+            
+        if self.huella_terminada:
+            self.leyendo_huella = False 
+            
+            # Actualizamos la etiqueta con el resultado
+            if self.resultado_huella == "ERROR":
+                self.lbl_estado_huella.configure(text="Error de Lector", text_color="#e74c3c")
+            elif self.resultado_huella:
+                self.huella_temporal = self.resultado_huella
+                self.lbl_estado_huella.configure(text="Huella Capturada ✔️", text_color="#2ecc71")
+            else:
+                self.lbl_estado_huella.configure(text="Reintentar Captura", text_color="#e74c3c")
+        else:
+            # Re-evaluamos en 100ms
+            self.after(100, self.vigilar_captura)
